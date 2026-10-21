@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/asset_pipeline",
+    "crates/engine",
+]
+resolver = "2"

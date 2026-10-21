@@ -1,0 +1,12 @@
+[package]
+name = "asset_pipeline"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+walkdir = "2.5"
+bytemuck = { version = "1.19", features = ["derive"] }

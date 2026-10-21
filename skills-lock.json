@@ -1,0 +1,311 @@
+{
+  "version": 1,
+  "skills": {
+    "backlog": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/backlog/SKILL.md",
+      "computedHash": "e76e159fdd763a15d6dec4c4517d8ce95936672194bf9f2a9c0797635d1fe623"
+    },
+    "checklist": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/checklist/SKILL.md",
+      "computedHash": "6f7da431b4eece4da416c9b3e95ae3138c96c127300143d3acf51b8822661d9b"
+    },
+    "codemap": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/codemap/SKILL.md",
+      "computedHash": "684a698dc5a3b3fb7dc2cdd83d6d69e286af1a56181970073a04021ea288da4e"
+    },
+    "coding": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/coding/SKILL.md",
+      "computedHash": "b0fe507f294c5ac5bbd94b022f7b548e76bf01c158e6b3d5b6847d67c69fb5f1"
+    },
+    "coding-agents-farm": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/coding-agents-farm/SKILL.md",
+      "computedHash": "aea5db242d739387e374d95d657ba2eb6ac95f926b6227b125f48f1ce4d9fe0b"
+    },
+    "coding-agents-hooks-authoring": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/coding-agents-hooks-authoring/SKILL.md",
+      "computedHash": "0ec91b348431238675edd7517cf1373f4459265dd8520de3333adcd938ad529e"
+    },
+    "coding-agents-prompt-authoring": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/coding-agents-prompt-authoring/SKILL.md",
+      "computedHash": "86304aa4e24913cbe91b769c724ec6f04acfea4a0f913a24ea95b201657f96e3"
+    },
+    "collect-github-stats": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/collect-github-stats/SKILL.md",
+      "computedHash": "2dc13c6d0886d6b5a163e1ff11918b3f90b44f503497ced361486cf19e792d2b"
+    },
+    "compress-prompt": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/compress-prompt/SKILL.md",
+      "computedHash": "ff70c2fbcaf13a9aae4079e946a606723732a74e965b5f55997c69d010847d45"
+    },
+    "daily-oss": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/daily-oss/SKILL.md",
+      "computedHash": "92eb07b7992153cc31f974dfc8caa6bfa7a060151c12bd8b47791852a3e34ea8"
+    },
+    "dangerous-actions": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/dangerous-actions/SKILL.md",
+      "computedHash": "db5b6dd645fa6dfd83afcf9e9612ed3be15f858c41ec4153a186959ece2a425a"
+    },
+    "data-collection": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/data-collection/SKILL.md",
+      "computedHash": "a34dc83398c0584f137193240910277c808c4746f3e474abff7dd906fe0bab6e"
+    },
+    "debugging": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/debugging/SKILL.md",
+      "computedHash": "c131e4dcde7e152070d434e3db6983279e765221c0747fc2cc6e16b130f55311"
+    },
+    "design": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/design/SKILL.md",
+      "computedHash": "74dd518f99a72df1013c469045848d5dd4911332388ed0ff9b9e9d76852eac7e"
+    },
+    "deviation": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/deviation/SKILL.md",
+      "computedHash": "490bb4d60b0ad4e802f79f5fc2e55689870cd852b837bfe2bcd88d5b14069dbe"
+    },
+    "discovery": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/discovery/SKILL.md",
+      "computedHash": "e3ca5104efbc225e1299bcf1e3bf74e3b79e8e565176f444307d2d4b5b4208da"
+    },
+    "documentation": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/documentation/SKILL.md",
+      "computedHash": "eccaddff3ef0f6d1783ffb085b9ba52e617087bfb6fbf3040456a3e1a38ed6a0"
+    },
+    "harness": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/harness/SKILL.md",
+      "computedHash": "eda3b74722b561724094e42c53d798f41697c6cdfa67bc9662abbd6a8847c9c0"
+    },
+    "hitl": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/hitl/SKILL.md",
+      "computedHash": "f9dafd80caad9944a5ae8d5a0eb22b0081086a1a295ff116d0db952bd80fcf6f"
+    },
+    "java-decompile": {
+      "source": "quarkusio/quarkusdev-skills",
+      "sourceType": "github",
+      "skillPath": "skills/java-decompile/SKILL.md",
+      "computedHash": "ea0bd9e90983a31ac3084d0484cd006fd28aa65fad62827dd9c57050af3fba80"
+    },
+    "large-workspace-handling": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/large-workspace-handling/SKILL.md",
+      "computedHash": "e5d9e3ea5aeccba358bd38eb794fe7b276a1a9cfc2714bc90f40cc243bf16496"
+    },
+    "load-project-context": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/load-project-context/SKILL.md",
+      "computedHash": "1847f431dbc954f6767bdaf510233f49ca411345461461c037b9cab73f247501"
+    },
+    "merge-main": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/merge-main/SKILL.md",
+      "computedHash": "632bbf9c274172665366f7d504c3649d093b68f321528804135d489135c10342"
+    },
+    "natural-writing": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/natural-writing/SKILL.md",
+      "computedHash": "339ee42e5d5dcb82837a37053426ca3424ffbd34ea46cbafd804c60251b1dc44"
+    },
+    "orchestration": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/orchestration/SKILL.md",
+      "computedHash": "2c898659ee63d485d082d3d6884d0ec8725f2814a10a3b46151cefb1a463a81f"
+    },
+    "planning": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/planning/SKILL.md",
+      "computedHash": "25f7a1bbc14cd62c8e0d6a4dee66d7e83e2ff6721fe55bc228185cd3f680d558"
+    },
+    "post-mortem": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/post-mortem/SKILL.md",
+      "computedHash": "8016d44c1382679d68fbb5b2b7f0c6df53e01a9fe7af9e3320f83ce8ab544686"
+    },
+    "qa-knowledge": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/qa-knowledge/SKILL.md",
+      "computedHash": "f641b7ddeca7880e022fdb939501dba40ac3bade6d42aa942ab76ac521ced7b8"
+    },
+    "qa-structure": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/qa-structure/SKILL.md",
+      "computedHash": "b8ce5f3feffe01d638564cbbc5d10c7ec49ab82596f5c88c129eccf74fb78369"
+    },
+    "questioning": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/questioning/SKILL.md",
+      "computedHash": "1e0c56f7e49717f86100d62b3c2e9c38595af7d6a5b59c2f5deccbd95b5e6cc1"
+    },
+    "reasoning": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/reasoning/SKILL.md",
+      "computedHash": "c1c5acd3f7ed00f5a970fbd87542cff1b890cd327bd6772108f8c79b92d0f218"
+    },
+    "requirements-authoring": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/requirements-authoring/SKILL.md",
+      "computedHash": "e4f3b8ab5c2c3dafdb088ebe47be6f8349c5fd7c842c46c3be080ced0d38a288"
+    },
+    "requirements-use": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/requirements-use/SKILL.md",
+      "computedHash": "c13e36b3e6ff77ac8ed490347dbc7301dcbe11fb0c5914fbe8d88886808a9d88"
+    },
+    "research": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/research/SKILL.md",
+      "computedHash": "3a67bea91ffd9f2ea323febf6cc4fb0791e1b86fb73682f2f4066f4063b8e737"
+    },
+    "reverse-engineering": {
+      "source": "rehan-remade/universal-modder",
+      "sourceType": "github",
+      "skillPath": "skills/reverse-engineering/SKILL.md",
+      "computedHash": "7c15fcebfd855f9e7560ee4eeadbe2487e04c6aca841822f5ade8b883ef0e78b"
+    },
+    "risk-assessment": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/risk-assessment/SKILL.md",
+      "computedHash": "612a06dc38faca3f415a5fee6de82a6eaee80898bccbee2b1c44df3aed70a82c"
+    },
+    "rosetta": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/rosetta/SKILL.md",
+      "computedHash": "269573bedb63e628bbee61fe800b915c051aa6ba25b04fdd33d299745733553c"
+    },
+    "security": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/security/SKILL.md",
+      "computedHash": "b2ad8be8f3725095d2f38983659e346d38a378cf820b993b4aad89fb804cda6c"
+    },
+    "self-learning": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/self-learning/SKILL.md",
+      "computedHash": "1ad2b514f234413bc767d7377a7d7bd3d29b5051c4f4e53018a9da77378d98c8"
+    },
+    "self-organization": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/self-organization/SKILL.md",
+      "computedHash": "2b6f423f9a47b9abaa3f8272069931140566f3d059724022a37f5a80ea41b408"
+    },
+    "sensitive-data": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/sensitive-data/SKILL.md",
+      "computedHash": "af9b64cc225f63b1af724b0a3d1de55b5977f6d0da552a1df4f9b44761b90385"
+    },
+    "solr-extending": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/solr-extending/SKILL.md",
+      "computedHash": "6817564f41163c6a764220601514baef4cb776e37370e1db3fc6eab4d0664acd"
+    },
+    "solr-query": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/solr-query/SKILL.md",
+      "computedHash": "572b548f70a91a8f65c1b76d136015234ecc678a54e026983232ced96fbcb908"
+    },
+    "solr-schema": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/solr-schema/SKILL.md",
+      "computedHash": "205f992bf64d5c4f8feb1f23e6d605960d27f2c2d871db27579c55c62f0e36ba"
+    },
+    "solr-semantic-search": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/solr-semantic-search/SKILL.md",
+      "computedHash": "0d0ce856df68348f0f88dda5856dbeceb9bee061b9fbeb6cbb1309ef974a469c"
+    },
+    "specflow-use": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/specflow-use/SKILL.md",
+      "computedHash": "d3a6bd8d6bfb06be1f97931fad108bd243204608507c4dcb9592ff0c457ea6c0"
+    },
+    "subagent-directives": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/subagent-directives/SKILL.md",
+      "computedHash": "ca44f944ded2ace57f404d935c9c986dd2f4a74f6ff2a408640afe8429ad077b"
+    },
+    "sync-web-site": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/sync-web-site/SKILL.md",
+      "computedHash": "5d7995bed6d52adfcae6375bea9b6a89cad059aa3e214d2de0dfbafaae2b9f41"
+    },
+    "tech-specs": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/tech-specs/SKILL.md",
+      "computedHash": "88d80175da6f6910d784b8bfc77633d5ab4d82081edfd943b75acd00ec8f0dec"
+    },
+    "testing": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": "plugins/core-claude/skills/testing/SKILL.md",
+      "computedHash": "4b43db2ed1d70e0dd0bb8d3b827d83b15f56d011f39c535013c4579fc557d3c0"
+    },
+    "update-change-log": {
+      "source": "griddynamics/rosetta",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/update-change-log/SKILL.md",
+      "computedHash": "8c8306cdc00650dd0e89ff1700e13278e042b8948dd312387cde447643015b4c"
+    }
+  }
+}
