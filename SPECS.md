@@ -153,9 +153,78 @@ $$\text{Triangulation} = \begin{cases}
 
 ## 5. Phase 2 Subsystem Architecture & Dependency Roadmap
 
+### Step 2 (DONE): Offline Block Registry Bake
+
+`crates/asset_pipeline/src/bin/registry_baker.rs` bakes `assets/registry/block_registry.bin`
+from `assets/blockstates/` + `assets/models/block/` + `texture_manifest.json`.
+The engine loads this as a flat read-only array; it never parses model JSON.
+
+Binary format (little-endian, deterministic — all maps sorted):
+
+| Section | Layout |
+|---|---|
+| Header (32 B) | `magic "VXRG"` + 7 × u32: `version=1`, `block_count`, `state_count`, `names_len`, reserved ×3 |
+| Names blob | UTF-8 block names, concatenated; relative offsets |
+| Block index | 20 B/entry: `name_off u32`, `name_len u32`, `state_start u32`, `state_count u32`, `mesh_type u8`, `has_variants u8`, `pad u16` |
+| State rows | 32 B `BlockStateEntry` each: `faces[6] FaceInfo` (4 B: `base_layer u16`, `tint_mode u8`, `uv_rot u8`), `mesh_type u8`, `is_opaque u8`, `is_solid u8`, `light_emission u8`, `light_filter u8`, `pad[3]` |
+
+Face slot order: `0 = +Y (UP), 1 = -Y (DOWN), 2 = +Z (SOUTH), 3 = -Z (NORTH), 4 = +X (EAST), 5 = -X (WEST)`.
+
+Classification (`mesh_type`): 0 Empty · 1 Cube · 2 Cross · 3 Fluid · 4 Complex.
+Cube = every resolved element is a full `[0,0,0]-[16,16,16]` prism with cullface'd faces and
+cullface union covering all 6 directions (handles multi-element stacks like grass_block;
+their second "overlay" element is dropped in v1 — base texture wins per cullface).
+Empty = entity-rendered blocks (banners, chests, shulkers, skulls, air); they carry property
+bytes but no faces.
+
+Variant→face mapping: blockstate variant `x`/`y` are **degrees**, applied
+`Rx(x)∘Ry(y)` (Rx first — validated by golden test: `oak_log` axis=x ends on ±X, axis=z
+ends on ±Z with `uvlock`-free rotation). Variant values may be dict-form or array-form
+(26.3 randomized lists; first entry wins). Face-key fallback covers models omitting
+`cullface` on full prisms (piston family).
+
+Tint decisions (provenance: `BlockColors::createDefault()`, snapshot oracle, verified
+2026-10-22; constants birch 0x80A755 → layer 1840, spruce 0x619961 → 1841, lily-pad
+in-world 0x208030 → 1842):
+
+- `tint_mode 1` grass: fern, short_grass, potted_fern, bush, tall_grass, large_fern,
+  grass_block, sugar_cane *(sugar_cane PENDING-VERIFY: BlockTintSources.sugarCane() may
+  not equal the pure grass palette)*
+- `tint_mode 2` foliage: oak/jungle/acacia/dark_oak leaves, vine, mangrove_leaves.
+  **pale_oak_leaves is NOT tinted** (unregistered — fixed texture).
+- `tint_mode 3` water: water, bubble_column (fluid rows only).
+- `tint_mode 4` dry_foliage: leaf_litter — carried by Word 1 spare bit 0 at mesher packing
+  time (registry holds the value; the vertex enum has only 2 bits for 0..3).
+- `pink_petals`/`wildflowers` are **NOT grass-tinted** in v1 (BlockColors registers
+  `[BLANK, grass]`; petals texture is fixed color; stem-layer tint dropped with cross v1).
+- Fixed tints bake directly to pre-tinted layers 1840–1842 with `tint_mode = 0`.
+
+Property bytes v1 (PENDING-VERIFY against release-jar `Blocks`/`BlockBehaviour` decompiles
+before Step 2.5 tuning): cube → `is_opaque=1, is_solid=1, light_filter=15`; cross/complex →
+`0/1, filter=0`; fluid → `0/0, filter=15` with exceptions: `water/bubble_column filter=1`,
+leaves `filter=1`, `ice/frosted_ice filter=3`, `slime_block filter=1`, glass family
+`filter=0` (glass family: `!contains("glass")`), `tinted_glass filter=15`.
+Emissions (curated): lava/glowstone/sea_lantern/shroomlight/lantern/campfire/beacon/end
+portals/froglight 15; torches 14 (soul 10, redstone 7); crying_obsidian/magma(3).
+These are approximations; `getLightBlock`/emission must be re-derived from the release
+jar before light-field values are trusted for gameplay parity.
+
+Known v1 approximations (Step 3/4 refinement list):
+1. `uv_rot` uses only the model face's own `rotation` field; blockstate twist with
+   `uvlock` re-alignment is not computed (affects mostly complex blocks — fences/stairs).
+2. Multi-element cubes keep the FIRST element's texture per cullface (grass_block side
+   overlay dropped).
+3. Fluids emit ONE state row regardless of level variants (placement addressing will
+   expand when block IDs land).
+4. `farmland` (15/16-height top prism) and other near-full prisms classify Complex and
+   are mesher-skipped until Step 3 defines near-full handling.
+5. `air` is not stored: an unregistered block ID must read as the all-zero row
+   (state id `0` = air by convention; engine maps block→`state_start + 1`-style offsets
+   when IDs are introduced).
+
 ```mermaid
 flowchart TD
-    Step1["Step 1: Asset Pipeline Overhaul [DONE]<br/>• Extracted models, blockstates, mcmetas<br/>• 1,843 layers baked with 5 offline linear mips<br/>• Coverage-preserving alpha scaling<br/>• Timeline table & manifest exported"] --> Step2["Step 2: Block Registry & Model Resolver<br/>• Parse blockstates & block models<br/>• Map block IDs & faces to base layer IDs<br/>• Map fixed & dynamic tint modes"]
+    Step1["Step 1: Asset Pipeline Overhaul [DONE]<br/>• Extracted models, blockstates, mcmetas<br/>• 1,843 layers baked with 5 offline linear mips<br/>• Coverage-preserving alpha scaling<br/>• Timeline table & manifest exported"] --> Step2["Step 2: Block Registry & Model Resolver [DONE]<br/>• block_registry.bin: 1,288 blocks / 1,781 state rows (32 B)<br/>• structural classification + variant rotation math<br/>• tint decisions from BlockColors oracle; golden tests green"]
     
     Step2 --> Step2_5["Step 2.5: Chunk Light Field Subsystem (BFS Flood Fill)<br/>• Chunk light arrays: 4-bit block + 4-bit sky per voxel<br/>• Opacity-attenuated BFS falloff (15 to 0)<br/>• Cross-chunk boundary seeding<br/>• Remesh-on-light-change dirty policy"]
     
