@@ -10,9 +10,13 @@
 //!   (quarantined oracle `~/.minecraft-decomp/`), constants re-verified on 2026-10-22:
 //!   birch 0x80A755, spruce 0x619961, lily-pad in-world 0x208030.
 //! - Mesh-type classification is structural (resolved model elements + parent family).
-//! - `is_opaque` / `is_solid` / `light_emission` / `light_filter` use safe defaults plus a
-//!   curated PENDING-VERIFY exception list (documented in SPECS.md §Registry v1; values
-//!   must be re-verified against the *release* jar before light-field tuning).
+//! - `is_opaque` / `is_solid` / light emission / light filter derive from the checked-in
+//!   oracle table `assets/registry/block_properties.json` (extracted offline from the
+//!   release-jar `Blocks.java` decompile by `property_extractor.rs`). Emission is
+//!   per-state: LIT-conditioned emitters (`litBlockEmission` λ in Blocks.java) bake
+//!   exact per-variant rows; single-row Complex/Empty blocks collapse to always-lit
+//!   (documented v1 approximation). Dampening derives from the release-jar default
+//!   formula + class overrides; `is_opaque` now means canOcclude. See SPECS.md.
 //! - v1 approximation: canonical-cube rows bake only the FIRST resolved element
 //!   (grass_block side overlay is a second element and is dropped — documented).
 //! - v1 approximation: `uv_rot` is the model face's own `rotation` field; blockstate
@@ -382,57 +386,171 @@ fn tint_decision(block: &str) -> TintDecision {
 }
 
 // ---------------------------------------------------------------------------
-// Light/physics property defaults + curated PENDING-VERIFY exceptions
+// Verified block properties (light emission / dampening / occlusion)
 // ---------------------------------------------------------------------------
+// Values live in `assets/registry/block_properties.json`, machine-extracted from
+// the decompiled release-jar `Blocks.java` by `property_extractor.rs` (the one
+// non-hermetic step; run it offline). This baker reads the JSON only.
+//
+// Derivation provenance (release jar, 26.3):
+// - `BlockBehaviour.getLightDampening` default (BlockBehaviour.java:274-280):
+//     solidRender ? 15 : propagatesSkylightDown ? 0 : 1
+//   where solidRender == canOcclude && occlusion shape is a full block
+//   (BlockBehaviour$BlockStateBase.java:161-162).
+// - Class overrides: LeavesBlock.java:80 (=1), TintedGlassBlock.java:15-17 (=15),
+//   TransparentBlock.java:30-32 / WaterloggedTransparentBlock / StainedGlassBlock
+//   extend it (propagatesSkylightDown => 0). `IceBlock`/`HalfTransparentBlock`
+//   have NO overrides: ice/frosted_ice ride the default path → 1, while
+//   packed_ice/blue_ice (occluding full prisms) hit solidRender → 15.
+// - Fluids: `LiquidBlock` (Blocks.java:246) has no dampening override and both
+//   water and lava register `.liquid()` (canOcclude=false) with
+//   `LiquidBlock.propagatesSkylightDown=false` (LiquidBlock.java:94) → 1 each.
+// - The engine-side `max(1, dampening)` step is `LightEngine.getOpacity`
+//   (LightEngine.java:79-81); the 16-gate of `getLightDampeningInto`
+//   (LightEngine.java:52-62) only engages `useShapeForLightOcclusion` blocks
+//   (stairs/panes — the complex-skip set) and is noted for Step 2.5.
 
-fn light_emission(block: &str) -> u8 {
-    let v = match block {
-        "lava" | "glowstone" | "sea_lantern" | "shroomlight" | "lantern" | "campfire" | "beacon"
-        | "end_gateway" | "end_portal" => 15,
-        "torch" | "wall_torch" | "end_rod" => 14,
-        "soul_lantern" | "soul_campfire" | "crying_obsidian" | "redstone_lamp_on" => 10,
-        "soul_torch" | "soul_wall_torch" => 10,
-        "redstone_torch" | "redstone_wall_torch" => 7,
-        "magma_block" => 3,
-        _ => return 0,
-    };
-    // Wildcards for colored froglights etc.
-    if block.ends_with("froglight") {
-        return 15;
-    }
-    v
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Emission {
+    Constant { value: u8, #[serde(default)] decl: String },
+    Lit { value: u8, #[serde(default)] prop: String, #[serde(default)] decl: String },
+    LitScale {
+        base: u8,
+        per: u8,
+        #[serde(default)]
+        prop: String,
+        count_prop: String,
+        #[serde(default)]
+        decl: String,
+    },
+    AliveScale {
+        alive_prop: String,
+        add: u8,
+        per: u8,
+        count_prop: String,
+        #[serde(default)]
+        decl: String,
+    },
+    PropValue { prop: String, #[serde(default)] decl: String },
+    PropScale { prop: String, per: u8, denom: u8, #[serde(default)] decl: String },
+    PropMap { prop: String, map: BTreeMap<String, u8>, #[serde(default)] decl: String },
 }
 
-fn light_filter(block: &str, mesh_type: u8) -> u8 {
-    if block == "tinted_glass" {
-        return 15;
-    }
-    if block.contains("glass") {
-        return 0;
-    }
-    let override_v = match block {
-        "ice" | "frosted_ice" => Some(3u8), // PENDING-VERIFY
-        "water" | "bubble_column" => Some(1u8),
-        "slime_block" => Some(1u8), // PENDING-VERIFY
-        _ => None,
-    };
-    if let Some(v) = override_v {
-        return v;
-    }
-    if block.ends_with("leaves") {
-        return 1; // vanilla foliage attenuates light by 1
-    }
-    match mesh_type {
-        MESH_CUBE => 15,
-        MESH_FLUID => 15, // lava and unknown fluids
-        _ => 0,           // cross, complex, empty: light passes at voxel granularity
-    }
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+pub struct BlockProps {
+    #[serde(default)]
+    pub emission: BTreeMap<String, Emission>,
+    #[serde(default)]
+    pub no_occlusion: BTreeSet<String>,
+    #[serde(default)]
+    pub skylight: BTreeSet<String>,
 }
 
-fn is_opaque(mesh_type: u8) -> u8 {
-    match mesh_type {
-        MESH_CUBE => 1,
-        _ => 0,
+impl BlockProps {
+    pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let text = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    fn is_fluid(block: &str) -> bool {
+        let b = block.strip_prefix("flowing_").unwrap_or(block);
+        matches!(b, "water" | "lava" | "bubble_column")
+    }
+
+    fn val_u8(vals: &BTreeMap<String, String>, key: &str) -> u8 {
+        vals.get(key).and_then(|v| v.parse::<u8>().ok()).unwrap_or(0)
+    }
+
+    fn is_true(vals: &BTreeMap<String, String>, key: &str) -> bool {
+        vals.get(key).map(|v| v == "true").unwrap_or(false)
+    }
+
+    /// Per-state block-light emission. `collapsed = true` bakes the always-lit
+    /// representative value for single-row (Complex/Empty) approximations, as
+    /// documented in SPECS.md §Registry v1.
+    pub fn emission_row(&self, block: &str, vals: &BTreeMap<String, String>, collapsed: bool) -> u8 {
+        let rec = self
+            .emission
+            .get(block)
+            .or_else(|| self.emission.get(block.strip_prefix("flowing_").unwrap_or(block)));
+        let Some(rec) = rec else { return 0 };
+        match rec {
+            Emission::Constant { value, .. } => *value,
+            Emission::Lit { value, prop, .. } => {
+                if collapsed {
+                    return *value;
+                }
+                let key = if prop.is_empty() { "lit" } else { prop };
+                if Self::is_true(vals, key) { *value } else { 0 }
+            }
+            Emission::LitScale { base, per, prop, count_prop, .. } => {
+                let count = Self::val_u8(vals, count_prop).max(1);
+                if collapsed {
+                    return *base;
+                }
+                let key = if prop.is_empty() { "lit" } else { prop };
+                if Self::is_true(vals, key) {
+                    base.saturating_add(per.saturating_mul(count - 1))
+                } else {
+                    0
+                }
+            }
+            Emission::AliveScale { alive_prop, add, per, count_prop, .. } => {
+                let count = Self::val_u8(vals, count_prop).max(1);
+                if collapsed {
+                    return add.saturating_add(per.saturating_mul(1));
+                }
+                if Self::is_true(vals, alive_prop) {
+                    add.saturating_add(per.saturating_mul(count))
+                } else {
+                    0
+                }
+            }
+            Emission::PropValue { prop, .. } => {
+                if collapsed { 0 } else { Self::val_u8(vals, prop) }
+            }
+            Emission::PropScale { prop, per, denom, .. } => {
+                if collapsed {
+                    0
+                } else {
+                    let v = Self::val_u8(vals, prop) as u32;
+                    ((v * *per as u32) / (*denom as u32)) as u8
+                }
+            }
+            Emission::PropMap { prop, map, .. } => {
+                if collapsed {
+                    map.values().copied().max().unwrap_or(0)
+                } else {
+                    map.get(vals.get(prop).map(String::as_str).unwrap_or("")).copied().unwrap_or(0)
+                }
+            }
+        }
+    }
+
+    /// Light dampening (attenuation per voxel) via the release-jar derivation.
+    pub fn light_filter(&self, block: &str, mesh_type: u8) -> u8 {
+        if block == "tinted_glass" {
+            return 15; // TintedGlassBlock.java:15-17 explicit override
+        }
+        if Self::is_fluid(block) {
+            return 1; // LiquidBlock.java relationships above
+        }
+        let full = mesh_type == MESH_CUBE;
+        let occluding = !self.no_occlusion.contains(block);
+        if full && occluding {
+            return 15; // solidRender (BlockBehaviour$BlockStateBase.java:161-162)
+        }
+        if !full || self.skylight.contains(block) {
+            return 0; // shape does not stop skylight (torch/pane/glass/grate or empty)
+        }
+        1 // full shape, non-occluding: leaves, ice family, slime/honey
+    }
+
+    /// `is_opaque` now means canOcclude (guesstimated as a full prism without
+    /// `noOcclusion`), matching how dampening derives it. Mesher culling reads this.
+    pub fn is_opaque(&self, block: &str, mesh_type: u8) -> u8 {
+        u8::from(mesh_type == MESH_CUBE && !self.no_occlusion.contains(block))
     }
 }
 
@@ -501,6 +619,7 @@ pub fn bake(
     blockstates_dir: &Path,
     models_dir: &Path,
     manifest_path: &Path,
+    props: &BlockProps,
 ) -> Result<Baked, Box<dyn std::error::Error>> {
     let models = Models::load(models_dir)?;
     let manifest: Value = serde_json::from_str(&std::fs::read_to_string(manifest_path)?)?;
@@ -598,13 +717,14 @@ pub fn bake(
                 entry.mesh_type = MESH_FLUID;
                 entry.is_opaque = 0;
                 entry.is_solid = 0;
-                entry.light_emission = light_emission(&name);
-                entry.light_filter = light_filter(&name, MESH_FLUID);
+                let empty = BTreeMap::new();
+                entry.light_emission = props.emission_row(&name, &empty, false);
+                entry.light_filter = props.light_filter(&name, MESH_FLUID);
                 states.push(entry);
             } else if let Some(Value::Object(variants)) = bs.get("variants") {
                 // Expand property combinations for mesh-relevant states.
                 let mut combo_map: BTreeMap<String, VariantValue> = BTreeMap::new();
-                let mut props: Vec<(String, Vec<String>)> = Vec::new();
+                let mut variant_props: Vec<(String, Vec<String>)> = Vec::new();
                 for (k, v) in variants {
                     let assigns = parse_key(k);
                     // register canonical combos per assignment-set
@@ -614,35 +734,44 @@ pub fn bake(
                         combo_map.insert(canon, vv.clone());
                     }
                     for (pk, mut vals) in assigns {
-                        if let Some(slot) = props.iter_mut().find(|(k, _)| *k == pk) {
+                        if let Some(slot) = variant_props.iter_mut().find(|(k, _)| *k == pk) {
                             for val in vals.drain(..) {
                                 if !slot.1.contains(&val) {
                                     slot.1.push(val);
                                 }
                             }
                         } else {
-                            props.push((pk, vals));
+                            variant_props.push((pk, vals));
                         }
                     }
                 }
 
-                let count: usize = props.iter().map(|(_, v)| v.len()).product::<usize>().max(1);
+                let count = variant_props
+                    .iter()
+                    .map(|(_, v)| v.len())
+                    .product::<usize>()
+                    .max(1);
                 if count > 100_000 {
                     return Err(format!("{}: variant explosion ({})", name, count).into());
                 }
-                if props.is_empty() {
+                if variant_props.is_empty() {
                     let vv = variants
                         .get("")
                         .or_else(|| variants.values().next())
                         .map(VariantValue::from_entry)
                         .ok_or_else(|| format!("{}: no resolvable variant", name))?;
-                    states.push(cube_state_row(&models, &name, &vv, mesh_type, &layer_of)?);
+                    let empty = BTreeMap::new();
+                    states.push(cube_state_row(
+                        &models, &name, &vv, mesh_type, &layer_of, props, &empty,
+                    )?);
                 } else {
-                    for combo in combos(&props) {
+                    for combo in combos(&variant_props) {
                         match combo_map.get(&canonical_combo(&combo)) {
                             Some(vv) => {
+                                let vals: BTreeMap<String, String> =
+                                    combo.iter().cloned().collect();
                                 states.push(cube_state_row(
-                                    &models, &name, vv, mesh_type, &layer_of,
+                                    &models, &name, vv, mesh_type, &layer_of, props, &vals,
                                 )?)
                             }
                             None => {
@@ -657,13 +786,16 @@ pub fn bake(
                 }
             }
         } else {
-            // EMPTY / COMPLEX: single row, no faces baked
+            // EMPTY / COMPLEX: single collapsed row, no faces baked. State-dependent
+            // light emitters collapse to their always-lit value (SPECS approximation)
+            // until per-state expansion lands for complex blocks.
             let mut entry = BlockStateEntry::default();
             entry.mesh_type = mesh_type;
-            entry.is_opaque = is_opaque(mesh_type);
+            entry.is_opaque = props.is_opaque(&name, mesh_type);
             entry.is_solid = is_solid(mesh_type);
-            entry.light_emission = light_emission(&name);
-            entry.light_filter = light_filter(&name, mesh_type);
+            let empty = BTreeMap::new();
+            entry.light_emission = props.emission_row(&name, &empty, true);
+            entry.light_filter = props.light_filter(&name, mesh_type);
             states.push(entry);
         }
 
@@ -762,29 +894,36 @@ fn combos(props: &[(String, Vec<String>)]) -> Vec<Vec<(String, String)>> {
 }
 
 fn canonical_full_cube_elements(elements: &[Value]) -> bool {
-    if elements.is_empty() {
-        return false;
+    let is_full_with_cull = |e: &Value| -> bool {
+        e.get("from").map(v_is_unit_origin) == Some(true)
+            && e.get("to").map(v_is_unit_max) == Some(true)
+            && e
+                .get("faces")
+                .and_then(|f: &Value| f.as_object().map(|o| o.values().count()))
+                .unwrap_or(0)
+                >= 6
+            && e.get("faces")
+                .and_then(|f: &Value| f.as_object())
+                .map(|o| {
+                    o.values().all(|fv| {
+                        fv.get("cullface").and_then(|c| c.as_str()).is_some() || false
+                    })
+                })
+                .unwrap_or(false)
+    };
+
+    // Case 1: every element is a full 16³ prism with directional cullfaces
+    // (the multi-full-element stacked family — grass_block overlay).
+    if !elements.is_empty() && elements.iter().all(is_full_with_cull) {
+        return true;
     }
-    let mut culls: BTreeSet<String> = BTreeSet::new();
-    for e in elements {
-        let full = e.get("from").map(v_is_unit_origin) == Some(true)
-            && e.get("to").map(v_is_unit_max) == Some(true);
-        if !full {
-            return false;
-        }
-        let Some(Value::Object(faces)) = e.get("faces") else {
-            return false;
-        };
-        for (_, fv) in faces {
-            match fv.get("cullface").and_then(|c| c.as_str()) {
-                Some(c) => {
-                    culls.insert(c.to_string());
-                }
-                None => return false, // full-prism elements must cull by direction
-            }
-        }
-    }
-    culls.len() == 6
+
+    // Case 2: one covering full element (slime/honey have an inner decoration
+    // box inside a full outer shell). Matches shape-based occlusion: the block
+    // occupies the whole voxel, so the mesher may treat it as CUBE. Interior
+    // texture elements are dropped (same documented approximation as
+    // grass_block overlays).
+    elements.iter().any(is_full_with_cull)
 }
 
 fn v_is_unit_origin(v: &Value) -> bool {
@@ -800,19 +939,22 @@ fn v_is_unit_max(v: &Value) -> bool {
 }
 
 /// Build one (possibly rotated) state row for a CUBE/CROSS state.
+#[allow(clippy::too_many_arguments)]
 fn cube_state_row(
     models: &Models,
     block: &str,
     vv: &VariantValue,
     mesh_type: u8,
     layer_of: &dyn Fn(&str) -> Option<u16>,
+    block_props: &BlockProps,
+    vals: &BTreeMap<String, String>,
 ) -> Result<BlockStateEntry, Box<dyn std::error::Error>> {
     let mut entry = BlockStateEntry::default();
     entry.mesh_type = mesh_type;
-    entry.is_opaque = is_opaque(mesh_type);
+    entry.is_opaque = block_props.is_opaque(block, mesh_type);
     entry.is_solid = is_solid(mesh_type);
-    entry.light_emission = light_emission(block);
-    entry.light_filter = light_filter(block, mesh_type);
+    entry.light_emission = block_props.emission_row(block, vals, false);
+    entry.light_filter = block_props.light_filter(block, mesh_type);
 
     let tint = tint_decision(block);
     let tint_mode = match tint {
@@ -943,10 +1085,19 @@ pub fn emit(baked: &Baked) -> Vec<u8> {
 }
 
 pub fn write_registry(assets: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let props = BlockProps::load(&assets.join("registry/block_properties.json"))
+        .map_err(|e| {
+            format!(
+                "block_properties.json missing/broken ({}); run `cargo run -p asset_pipeline \
+                 --bin property_extractor ~/.minecraft-decomp/src/Blocks.java` offline first",
+                e
+            )
+        })?;
     let baked = bake(
         &assets.join("blockstates"),
         &assets.join("models/block"),
         &assets.join("textures/texture_manifest.json"),
+        &props,
     )?;
     for w in &baked.warnings {
         eprintln!("registry warning: {}", w);
@@ -1001,10 +1152,13 @@ mod tests {
 
     fn baked() -> Baked {
         let dir = assets_dir();
+        let props = BlockProps::load(&dir.join("registry/block_properties.json"))
+            .expect("block_properties.json (run property_extractor offline)");
         bake(
             &dir.join("blockstates"),
             &dir.join("models/block"),
             &dir.join("textures/texture_manifest.json"),
+            &props,
         )
         .expect("bake must succeed on real data (golden: unresolved == 0)")
     }
@@ -1101,6 +1255,67 @@ mod tests {
             "petals are NOT grass-tinted (BlockColors: BLANK first layer)");
         let grass = &b.blocks["grass_block"];
         assert_eq!(grass.states[0].faces[FACE_UP].tint_mode, TINT_GRASS);
+    }
+
+    #[test]
+    fn golden_light_release_values() {
+        let b = baked();
+
+        // LIT-conditioned emitters are per-state (Blocks.java litBlockEmission).
+        // furnace: facing(4) × lit(2) → half the rows emit 13, half 0.
+        let rows = &b.blocks["furnace"].states;
+        assert_eq!(rows.len(), 8);
+        assert_eq!(rows.iter().filter(|s| s.light_emission == 13).count(), 4, "furnace lit rows");
+        assert_eq!(rows.iter().filter(|s| s.light_emission == 0).count(), 4, "furnace unlit rows");
+        assert!(rows.iter().all(|s| s.light_filter == 15));
+
+        // redstone_lamp is ONE block, LITλ=15 (no separate *_on block exists).
+        let rows = &b.blocks["redstone_lamp"].states;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.iter().filter(|s| s.light_emission == 15).count(), 1);
+        assert_eq!(rows.iter().filter(|s| s.light_emission == 0).count(), 1);
+
+        // Complex LIT emitters collapse to always-lit (SPECS approximation): torches,
+        // campfires. Collapse value equals the lit emission.
+        assert_eq!(b.blocks["torch"].states[0].light_emission, 14);
+        assert_eq!(b.blocks["redstone_torch"].states[0].light_emission, 7);
+        assert_eq!(b.blocks["campfire"].states[0].light_emission, 15);
+        assert_eq!(b.blocks["campfire"].states[0].light_filter, 0);
+
+        // Fluids: water AND lava dampen by 1 (LiquidBlock default path; the old
+        // "lava blocks light" value was a myth — it merely emits 15).
+        assert_eq!(b.blocks["lava"].states[0].light_emission, 15);
+        assert_eq!(b.blocks["lava"].states[0].light_filter, 1);
+        assert_eq!(b.blocks["water"].states[0].light_emission, 0);
+
+        // Ice family split: ice/frosted ride the default path (1); packed/blue are
+        // occluding full prisms (solidRender → 15).
+        assert_eq!(b.blocks["ice"].states[0].light_filter, 1);
+        assert_eq!(b.blocks["frosted_ice"].states[0].light_filter, 1);
+        assert_eq!(b.blocks["packed_ice"].states[0].light_filter, 15);
+        assert_eq!(b.blocks["blue_ice"].states[0].light_filter, 15);
+
+        // Glass family: propagatesSkylightDown class override → 0 and non-occluding.
+        for n in ["glass", "white_stained_glass", "glass_pane"] {
+            let st = &b.blocks[n].states[0];
+            assert_eq!(st.light_filter, 0, "{n}");
+            assert_eq!(st.is_opaque, 0, "{n}");
+        }
+        assert_eq!(b.blocks["tinted_glass"].states[0].light_filter, 15);
+
+        // Full-shape non-occluding: slime/honey dampen 1; leaves do too.
+        assert_eq!(b.blocks["slime_block"].states[0].light_filter, 1);
+        assert_eq!(b.blocks["slime_block"].states[0].is_opaque, 0);
+        assert_eq!(b.blocks["honey_block"].states[0].light_filter, 1);
+        let leaves = &b.blocks["oak_leaves"].states[0];
+        assert_eq!(leaves.light_filter, 1);
+        assert_eq!(leaves.is_opaque, 0);
+
+        // Fire collapses to 15; opaque cubes keep 15/15.
+        assert_eq!(b.blocks["fire"].states[0].light_emission, 15);
+        assert_eq!(b.blocks["glowstone"].states[0].light_emission, 15);
+        assert_eq!(b.blocks["glowstone"].states[0].light_filter, 15);
+        assert_eq!(b.blocks["stone"].states[0].light_filter, 15);
     }
 
     #[test]

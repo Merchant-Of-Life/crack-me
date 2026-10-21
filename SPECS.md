@@ -199,21 +199,66 @@ in-world 0x208030 → 1842):
   `[BLANK, grass]`; petals texture is fixed color; stem-layer tint dropped with cross v1).
 - Fixed tints bake directly to pre-tinted layers 1840–1842 with `tint_mode = 0`.
 
-Property bytes v1 (PENDING-VERIFY against release-jar `Blocks`/`BlockBehaviour` decompiles
-before Step 2.5 tuning): cube → `is_opaque=1, is_solid=1, light_filter=15`; cross/complex →
-`0/1, filter=0`; fluid → `0/0, filter=15` with exceptions: `water/bubble_column filter=1`,
-leaves `filter=1`, `ice/frosted_ice filter=3`, `slime_block filter=1`, glass family
-`filter=0` (glass family: `!contains("glass")`), `tinted_glass filter=15`.
-Emissions (curated): lava/glowstone/sea_lantern/shroomlight/lantern/campfire/beacon/end
-portals/froglight 15; torches 14 (soul 10, redstone 7); crying_obsidian/magma(3).
-These are approximations; `getLightBlock`/emission must be re-derived from the release
-jar before light-field values are trusted for gameplay parity.
+Property bytes v2 (release-jar verified 2026-10-22; oracle table
+`assets/registry/block_properties.json` ← `property_extractor.rs` ← decompiled
+`Blocks.java`; baker/tests consume the JSON only, never the decompiles):
+
+- **Emission is per-state.** `litBlockEmission(N)` in `Blocks.java` means
+  `state.getValue(LIT) ? N : 0`. Exact per-variant rows bake for variant-expanded
+  mesh types (furnace/blast_furnace/smoker lit 13·unlit 0, redstone_lamp 15,
+  redstone_ore+deepslate 9, redstone_torch 7, candle_cake 3 lit). State-driven
+  kinds: `lit_scale` (candle: lit ? 3·CANDLES — CandleBlock.java:42),
+  `alive_scale` (sea_pickle: waterlogged ? 3+3·PICKLES), `prop_value`
+  (light block = its `level`), `prop_scale` (respawn_anchor = floor(charge/4·15)),
+  `prop_map` (vault 6/12 by state; trial_spawner 0/4/8). Weathering copper bulbs:
+  lit 15/12/8/4 by oxidation (copper_…/exposed/…/oxidized).
+- Constants: lava(15; dampening nonetheless **1**), glowstone/sea_lantern/
+  shroomlight/lantern/jack_o_lantern/conduit/beacon/end_portals/froglights 15;
+  all torch families 14 (soul 10, redstone lit 7, copper 14); fire 15 / soul_fire 10;
+  crying_obsidian 10; nether_portal 11; magma 3; end_portal_frame 1;
+  amethyst family 5/4/2/1; sculk sensor 1 / catalyst 6; dragon_egg 1;
+  brown_mushroom 1; brewing_stand 1; enchanting_table 7; ender_chest 7;
+  glow_lichen 7 (approximation — hasAnyFace λ collapses on the single row);
+  glowstone dampening 15 (occludes).
+- **Dampening** (attenuation per step — `BlockBehaviour.java:274-280` +
+  `LightEngine.getOpacity = max(1, dampening)`): derived rule
+  `solidRender ? 15 : propagatesSkylightDown ? 0 : 1` over the registry's
+  classification + occlusion set; class overrides harvested: leaves 1 /
+  tinted_glass 15; `skylight` set (TransparentBlock family: glass+stained glass,
+  grates) → 0. Results: opaque cubes 15; **all fluids incl. lava 1** (the old
+  "lava blocks light" value was pre-1.14 folklore; `LiquidBlock.propagatesSkylightDown
+  = false` + `.liquid()` ⇒ 1, LightEngine.java:79-81); ice/frosted 1 (no dampening
+  override — `HalfTransparentBlock` path) BUT **packed_ice/blue_ice 15** (occluding
+  full prisms ⇒ solidRender; no `noOcclusion()` in their registrations);
+  slime/honey 1; glass family 0; tinted_glass 15; cross/complex/empty 0.
+- `is_opaque` now means canOcclude (full prism ∧ not in `no_occlusion`): glass
+  family, leaves, ice/frosted, slime/honey, tinted_glass bake 0. Mesher culling and
+  dampening share the same set (both hinge on `noOcclusion()`).
+- Canonical-cube rule refined: a model whose elements contain one covering full 16³
+  prism (slime/honey inner-juice shell) classifies CUBE; interior texture elements
+  drop (same approximation as grass_block overlays).
+
+Step 2.5 invariants for the light field (release-jar mechanics):
+- Direct sky column: `(x,z)` columns above the first non-propagating block get
+  sky=15 with zero attenuation (`SkyLightEngine` lowestSourceY path).
+- Lateral/other propagation: BFS with per-step decrement
+  `max(1, dampening(destination))`.
+- Section storage: **4,096 B** per 16³ section, one byte per voxel
+  `(sky << 4) | block`.
+- `getRawBrightness` (LevelLightEngine.java:142-146) is
+  `max(blockLight, skyLight − skyDampen)` — a dimension-ambient *subtraction*, NOT
+  a day-factor multiply. The shader `day_factor` design mimics the client
+  `LightTexture` day ramp; cite it as a client approximation in SPECS.
+- Shape gate: `LightEngine.getLightDampeningInto` blocks light 16 when merged
+  occlusion faces close the boundary — engages only `useShapeForLightOcclusion`
+  blocks (stairs/panes; our complex-skip set) — carried to the Step 2.5 boundary
+  propagator when those mesh.
 
 Known v1 approximations (Step 3/4 refinement list):
 1. `uv_rot` uses only the model face's own `rotation` field; blockstate twist with
    `uvlock` re-alignment is not computed (affects mostly complex blocks — fences/stairs).
 2. Multi-element cubes keep the FIRST element's texture per cullface (grass_block side
-   overlay dropped).
+   overlay, slime/honey inner-shell texture dropped).
 3. Fluids emit ONE state row regardless of level variants (placement addressing will
    expand when block IDs land).
 4. `farmland` (15/16-height top prism) and other near-full prisms classify Complex and
@@ -221,12 +266,19 @@ Known v1 approximations (Step 3/4 refinement list):
 5. `air` is not stored: an unregistered block ID must read as the all-zero row
    (state id `0` = air by convention; engine maps block→`state_start + 1`-style offsets
    when IDs are introduced).
+6. Complex/Empty blocks stay single-row: LIT-conditioned emitters there (torches,
+   campfires, trial/vault/spawner, candle) collapse to always-lit values pending
+   light-relevant state expansion ( extractor records carry the predicates; see
+   Step 2.5 plan). Crescent emitters like glow_lichen/sea_pickle collapse to their
+   representative value with `decl` provenance in the oracle table.
+7. Waveforms/variants like respawn_anchor/map from state maps; an unknown
+   enumerated value falls back to 0, not a crash.
 
 ```mermaid
 flowchart TD
-    Step1["Step 1: Asset Pipeline Overhaul [DONE]<br/>• Extracted models, blockstates, mcmetas<br/>• 1,843 layers baked with 5 offline linear mips<br/>• Coverage-preserving alpha scaling<br/>• Timeline table & manifest exported"] --> Step2["Step 2: Block Registry & Model Resolver [DONE]<br/>• block_registry.bin: 1,288 blocks / 1,781 state rows (32 B)<br/>• structural classification + variant rotation math<br/>• tint decisions from BlockColors oracle; golden tests green"]
+    Step1["Step 1: Asset Pipeline Overhaul [DONE]<br/>• Extracted models, blockstates, mcmetas<br/>• 1,843 layers baked with 5 offline linear mips<br/>• Coverage-preserving alpha scaling<br/>• Timeline table & manifest exported"] --> Step2["Step 2: Block Registry & Model Resolver [DONE]<br/>• block_registry.bin: 1,288 blocks / 1,812 state rows (32 B)<br/>• structural classification + variant rotation math<br/>• tint decisions from BlockColors oracle; golden tests green"]
     
-    Step2 --> Step2_5["Step 2.5: Chunk Light Field Subsystem (BFS Flood Fill)<br/>• Chunk light arrays: 4-bit block + 4-bit sky per voxel<br/>• Opacity-attenuated BFS falloff (15 to 0)<br/>• Cross-chunk boundary seeding<br/>• Remesh-on-light-change dirty policy"]
+    Step2 --> Step2_5["Step 2.5: Chunk Light Field Subsystem (BFS Flood Fill)<br/>• Chunk light arrays: 4-bit block + 4-bit sky per voxel (4,096 B/section)<br/>• Opacity-attenuated BFS falloff (15 to 0); direct sky columns 15<br/>• Cross-chunk boundary seeding (getLightDampeningInto semantics)<br/>• Remesh-on-light-change dirty policy"]
     
     Step2_5 --> Step3["Step 3: 64-Bit Vertex Definition & Pure CPU Greedy Mesher<br/>• PackedVoxelVertex [u32; 2] layout<br/>• CPU greedy mesher with AO and lighting borders<br/>• Quad diagonal flip for anisotropy<br/>• Golden unit tests with synthetic voxel volumes"]
     
