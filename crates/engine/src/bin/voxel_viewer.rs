@@ -15,10 +15,39 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 use voxel_engine::bfs::{recompute_light_column, LightComputeResult, NeighborChunkLights};
 use voxel_engine::light::ChunkVoxelColumn;
 use voxel_engine::mesher::{mesh_section, OptionalHorizontalNeighbors, SectionHalo};
+use voxel_engine::physics::{
+    tick_player, PlayerInput, PlayerPhysicsState, VoxelWorldCollision, EYE_HEIGHT,
+};
 use voxel_engine::registry::BlockRegistry;
 use voxel_engine::render::{
     CameraUniform, GpuContext, SectionInstance, TerrainPipelines, TextureArray,
 };
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum MovementMode {
+    Physics,
+    Fly,
+}
+
+pub struct ViewerWorld {
+    pub voxels: Vec<Vec<ChunkVoxelColumn>>,
+    pub reg: Arc<BlockRegistry>,
+}
+
+impl VoxelWorldCollision for ViewerWorld {
+    fn is_solid_at(&self, x: i32, y: i32, z: i32) -> bool {
+        let cx = x.div_euclid(16);
+        let cz = z.div_euclid(16);
+        if cx >= 0 && cx < 6 && cz >= 0 && cz < 6 && y >= -64 && y < 320 {
+            let rel_x = x.rem_euclid(16) as usize;
+            let rel_z = z.rem_euclid(16) as usize;
+            let state_id = self.voxels[cx as usize][cz as usize].get_state(rel_x, y, rel_z);
+            self.reg.is_solid(state_id as u32)
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct AssetDirectoryNotFound {
@@ -131,11 +160,15 @@ struct AppState {
     sky_dampen: u32,
     keys_pressed: HashSet<KeyCode>,
     cursor_grabbed: bool,
-    start_time: Instant,
     last_frame_time: Instant,
     fps_timer: Instant,
     frame_count: u32,
     startup_line_printed: bool,
+    movement_mode: MovementMode,
+    player_physics: PlayerPhysicsState,
+    world: ViewerWorld,
+    tick_accumulator: f64,
+    tick_count: u32,
 }
 
 impl AppState {
@@ -206,7 +239,7 @@ impl AppState {
         let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
 
         // Load block registry
-        let reg = BlockRegistry::from_file(&assets.join("registry/block_registry.bin"))?;
+        let reg = Arc::new(BlockRegistry::from_file(&assets.join("registry/block_registry.bin"))?);
         let air_id = reg.get_block("air").map(|b| b.state_start as u16).unwrap_or(0);
         let stone_id = reg.get_block("stone").map(|b| b.state_start as u16).unwrap_or(0);
         let grass_id = reg
@@ -458,6 +491,15 @@ impl AppState {
             total_opaque_vertices, total_translucent_vertices, total_quads
         );
 
+        let world = ViewerWorld {
+            voxels,
+            reg: reg.clone(),
+        };
+
+        let spawn_pos = glam::DVec3::new(48.0, 10.0, 48.0);
+        let player_physics = PlayerPhysicsState::new(spawn_pos);
+        let camera_pos = glam::vec3(48.0, (10.0 + EYE_HEIGHT) as f32, 48.0);
+
         let now = Instant::now();
         Ok(Self {
             window,
@@ -471,17 +513,21 @@ impl AppState {
             camera_buf,
             camera_bind_group,
             sections,
-            camera_pos: glam::vec3(40.0, 10.0, 20.0),
+            camera_pos,
             camera_yaw: 0.0,
             camera_pitch: -0.2,
             sky_dampen: 0,
             keys_pressed: HashSet::new(),
             cursor_grabbed: false,
-            start_time: now,
             last_frame_time: now,
             fps_timer: now,
             frame_count: 0,
             startup_line_printed: false,
+            movement_mode: MovementMode::Physics,
+            player_physics,
+            world,
+            tick_accumulator: 0.0,
+            tick_count: 0,
         })
     }
 
@@ -499,40 +545,74 @@ impl AppState {
 
     fn update(&mut self) {
         let now = Instant::now();
-        let dt = (now - self.last_frame_time).as_secs_f32().min(0.1);
+        let dt = (now - self.last_frame_time).as_secs_f64();
         self.last_frame_time = now;
 
-        let sprint_mult = if self.keys_pressed.contains(&KeyCode::ControlLeft) {
-            2.5
-        } else {
-            1.0
-        };
-        let speed = 12.0 * dt * sprint_mult;
-        let (yaw_sin, yaw_cos) = self.camera_yaw.sin_cos();
-        let forward = glam::vec3(yaw_sin, 0.0, yaw_cos).normalize_or_zero();
-        // Screen-right under RH Y-up looking along forward: right = cross(forward, up)
-        let right = glam::vec3(-yaw_cos, 0.0, yaw_sin).normalize_or_zero();
+        // Single tick source: advance physics ticks AND camera.tick_count (20 Hz)
+        // Accumulator capped at 5 substeps (5 * 0.05 = 0.25 s); excess discarded
+        self.tick_accumulator += dt;
+        if self.tick_accumulator > 0.25 {
+            self.tick_accumulator = 0.25;
+        }
 
-        if self.keys_pressed.contains(&KeyCode::KeyW) {
-            self.camera_pos += forward * speed;
+        let mut substeps = 0;
+        while self.tick_accumulator >= 0.05 && substeps < 5 {
+            if self.movement_mode == MovementMode::Physics {
+                let input = PlayerInput {
+                    forward: self.keys_pressed.contains(&KeyCode::KeyW),
+                    backward: self.keys_pressed.contains(&KeyCode::KeyS),
+                    left: self.keys_pressed.contains(&KeyCode::KeyA),
+                    right: self.keys_pressed.contains(&KeyCode::KeyD),
+                    jump: self.keys_pressed.contains(&KeyCode::Space),
+                    sprint: self.keys_pressed.contains(&KeyCode::ControlLeft),
+                    yaw: self.camera_yaw as f64,
+                };
+                tick_player(&mut self.player_physics, &input, &self.world);
+            }
+            self.tick_count = self.tick_count.wrapping_add(1);
+            self.tick_accumulator -= 0.05;
+            substeps += 1;
         }
-        if self.keys_pressed.contains(&KeyCode::KeyS) {
-            self.camera_pos -= forward * speed;
-        }
-        if self.keys_pressed.contains(&KeyCode::KeyA) {
-            self.camera_pos -= right * speed;
-        }
-        if self.keys_pressed.contains(&KeyCode::KeyD) {
-            self.camera_pos += right * speed;
-        }
-        // Controls: Space stays ASCEND
-        if self.keys_pressed.contains(&KeyCode::Space) {
-            self.camera_pos.y += speed;
-        }
-        if self.keys_pressed.contains(&KeyCode::ShiftLeft)
-            || self.keys_pressed.contains(&KeyCode::ShiftRight)
-        {
-            self.camera_pos.y -= speed;
+
+        if self.movement_mode == MovementMode::Physics {
+            self.camera_pos = glam::vec3(
+                self.player_physics.pos.x as f32,
+                (self.player_physics.pos.y + EYE_HEIGHT) as f32,
+                self.player_physics.pos.z as f32,
+            );
+        } else {
+            // [FLY] mode keeps the 8625f86 / 45e6edc contract unchanged
+            let dt_f32 = (dt as f32).min(0.1);
+            let sprint_mult = if self.keys_pressed.contains(&KeyCode::ControlLeft) {
+                2.5
+            } else {
+                1.0
+            };
+            let speed = 12.0 * dt_f32 * sprint_mult;
+            let (yaw_sin, yaw_cos) = self.camera_yaw.sin_cos();
+            let forward = glam::vec3(yaw_sin, 0.0, yaw_cos).normalize_or_zero();
+            let right = glam::vec3(-yaw_cos, 0.0, yaw_sin).normalize_or_zero();
+
+            if self.keys_pressed.contains(&KeyCode::KeyW) {
+                self.camera_pos += forward * speed;
+            }
+            if self.keys_pressed.contains(&KeyCode::KeyS) {
+                self.camera_pos -= forward * speed;
+            }
+            if self.keys_pressed.contains(&KeyCode::KeyA) {
+                self.camera_pos -= right * speed;
+            }
+            if self.keys_pressed.contains(&KeyCode::KeyD) {
+                self.camera_pos += right * speed;
+            }
+            if self.keys_pressed.contains(&KeyCode::Space) {
+                self.camera_pos.y += speed;
+            }
+            if self.keys_pressed.contains(&KeyCode::ShiftLeft)
+                || self.keys_pressed.contains(&KeyCode::ShiftRight)
+            {
+                self.camera_pos.y -= speed;
+            }
         }
     }
 
@@ -569,8 +649,7 @@ impl AppState {
         let view_mat = glam::Mat4::look_at_rh(self.camera_pos, target, glam::Vec3::Y);
         let vp = proj * view_mat;
 
-        let tick_count = (self.start_time.elapsed().as_secs_f64() * 20.0) as u32;
-        let camera_uniform = CameraUniform::new_full(vp, self.sky_dampen, tick_count);
+        let camera_uniform = CameraUniform::new_full(vp, self.sky_dampen, self.tick_count);
         self.ctx.queue.write_buffer(
             &self.camera_buf,
             0,
@@ -656,9 +735,13 @@ impl AppState {
                 );
                 self.startup_line_printed = true;
             }
+            let mode_str = match self.movement_mode {
+                MovementMode::Physics => "PHYSICS",
+                MovementMode::Fly => "FLY",
+            };
             let title = format!(
-                "Minecraft 26.3 Voxel Viewer | FPS: {:.1} | Dampen: {} | Tick: {}",
-                fps, self.sky_dampen, tick_count
+                "Minecraft 26.3 Voxel Viewer | [{}] | FPS: {:.1} | Dampen: {} | Tick: {}",
+                mode_str, fps, self.sky_dampen, self.tick_count
             );
             self.window.set_title(&title);
             self.frame_count = 0;
@@ -769,6 +852,26 @@ impl ApplicationHandler for ViewerApp {
                         KeyCode::KeyM => {
                             state.sky_dampen = state.sky_dampen.saturating_sub(1);
                             println!("Sky dampen: {} / 15", state.sky_dampen);
+                        }
+                        // F toggles [PHYSICS] / [FLY]
+                        KeyCode::KeyF => {
+                            state.movement_mode = match state.movement_mode {
+                                MovementMode::Physics => {
+                                    println!("Movement mode: [FLY]");
+                                    MovementMode::Fly
+                                }
+                                MovementMode::Fly => {
+                                    state.player_physics.pos = glam::DVec3::new(
+                                        state.camera_pos.x as f64,
+                                        (state.camera_pos.y - EYE_HEIGHT as f32) as f64,
+                                        state.camera_pos.z as f64,
+                                    );
+                                    state.player_physics.vel = glam::DVec3::ZERO;
+                                    state.player_physics.on_ground = false;
+                                    println!("Movement mode: [PHYSICS]");
+                                    MovementMode::Physics
+                                }
+                            };
                         }
                         _ => {}
                     }

@@ -3,10 +3,19 @@ use bytemuck::{Pod, Zeroable};
 pub mod bfs;
 pub mod light;
 pub mod mesher;
+pub mod physics;
 pub mod registry;
 pub mod render;
 
 pub use bfs::{recompute_light_column, LightComputeResult, NeighborChunkLights, CARDINAL_DIRECTIONS};
+pub use physics::{
+    collide_with_shapes, collect_solid_colliders, move_and_collide, tick_player, Aabb,
+    PlayerInput, PlayerPhysicsState, VoxelWorldCollision, AIR_STEERING_SPRINT, AIR_STEERING_WALK,
+    COLLISION_EPSILON, EYE_HEIGHT, GRAVITY, GROUND_ACCEL_CONSTANT, GROUND_PROBE_OFFSET,
+    HORIZONTAL_DRAG_AIR, JUMP_IMPULSE, MAX_UP_STEP, NEGLIGIBLE_VERT, PLAYER_HEIGHT,
+    PLAYER_NEGLIGIBLE_HORIZ_SQ, PLAYER_WIDTH, SPRINT_JUMP_BOOST, SPRINT_SPEED, STEP_UP_NUDGE,
+    TERMINAL_VELOCITY, VERTICAL_DRAG, WALK_SPEED,
+};
 pub use light::{
     section_index_to_coords, section_voxel_index, ChunkLightColumn, ChunkVoxelColumn, LightSection,
     MAX_Y, MIN_Y, SECTION_COUNT, SECTION_SIZE, SECTION_VOXELS,
