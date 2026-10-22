@@ -125,6 +125,11 @@ fn parse_weathering_copper_prefixes(decomp_dir: &Path) -> Vec<String> {
             }
         }
     }
+    eprintln!(
+        "\n⚠️  [DIAGNOSTIC WARNING] WeatheringCopperCollection.java not found at {:?} or failed to parse!\n\
+         Falling back to static prefixes. Run Vineflower decompile to prevent coverage shrinkage.\n",
+        coll_path
+    );
     vec![
         "".to_string(),
         "exposed_".to_string(),
@@ -166,6 +171,11 @@ fn parse_copper_block_special_names(decomp_dir: &Path) -> Vec<String> {
             }
         }
     }
+    eprintln!(
+        "\n⚠️  [DIAGNOSTIC WARNING] BlockItemIds.java not found at {:?} or failed to parse!\n\
+         Falling back to static special names. Run Vineflower decompile to prevent coverage shrinkage.\n",
+        ids_path
+    );
     vec![
         "copper_block".to_string(),
         "copper".to_string(),
