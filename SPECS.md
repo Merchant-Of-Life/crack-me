@@ -626,17 +626,21 @@ flowchart TD
   Plains until per-voxel biome tinting lands, whereupon the composite resolves
   to a runtime decal quad. The composite bake must remain registry-driven —
   no hand-typed tables. Verify via a headless grass-block side golden.
-- **Snowy Grass Top Tint — REVIEW FINDING (2026-10-22), REQUIREMENT R5b**: the
-  snowy state (`grass_block[snowy=true]`) models its top through the vanilla
-  `cube_bottom_top` chain (`top = grass_block_top`), which carries NO
-  `tintindex`; the baker's "no tintindex → freeze TINT_NONE" rule therefore
-  bakes tint 0 on the snowy top (binary-verified). Vanilla applies the grass
-  tint at BLOCK level for `grass_block_top`-carrying faces regardless of the
-  snowy state (client BlockColors registration, not model data), so the snowy
-  top must be biome-tinted too. Required fix: decompile-verify the 26.3
-  BlockColors/GrassBlock registration path first, then bake the block-level
-  tint on that face. v1 impact is small (snowy grass ≈ never in Plains) —
-  schedule with the next registry round, do not silently forget.
+- **Snowy Grass Top Tint — REQUIREMENT R5b RETRACTED (decompile-verified,
+  2026-10-22)**: the earlier claim ("vanilla applies the grass tint at BLOCK
+  level regardless of snowy state") was WRONG. 26.3 ground truth: tint
+  APPLICATION is per-quad via the model's `tintindex` —
+  `ModelBlockRenderer.putQuadWithTint` (ModelBlockRenderer.java:203-219) tints
+  a quad iff `quad.materialInfo().tintIndex() != -1`; the block-level
+  registration (`BlockColors.createDefault()` →
+  `BlockTintSources.grassBlock()` → `$4`: `GrassColor.getDefaultColor()`) only
+  supplies the resolver CONSULTED by tinted quads. The snowy model chain
+  (`grass_block_snow.json` → `cube_bottom_top` → `cube`) declares NO tintindex
+  on any face, while default `grass_block.json` explicitly does (`up` +
+  overlay faces, `"tintindex": 0`). Since `grass_block_top.png` is per-pixel
+  grayscale (R=G=B), vanilla renders the snowy top UN-TINTED gray by design.
+  Engine consequence: state 666 stays `UP 630 / tint 0` — already
+  vanilla-exact from R5; NO registry change; R5b closed as no-op.
 
 ### 8. Fragment Texture Contract, UV Mapping, & Chunk Partitioning
 - **Registry-Driven Chunk Layer Partitioning**:
