@@ -5,6 +5,9 @@
 
 struct CameraUniform {
     view_proj: mat4x4<f32>,
+    sky_dampen: u32,
+    tick_count: u32,
+    _pad: vec2<u32>,
 };
 
 @group(0) @binding(0)
@@ -15,6 +18,18 @@ var t_array: texture_2d_array<f32>;
 
 @group(1) @binding(1)
 var s_array: sampler;
+
+struct AnimationMeta {
+    offset: u32,
+    len: u32,
+    frametime: u32,
+};
+
+@group(1) @binding(2)
+var<storage, read> animation_meta: array<AnimationMeta>;
+
+@group(1) @binding(3)
+var<storage, read> animation_timeline: array<u32>;
 
 struct VertexInput {
     @location(0) word0: u32,
@@ -74,7 +89,19 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     }
 
     out.uv = raw_uv;
-    out.layer = v.base_layer;
+
+    let anim_meta = animation_meta[v.base_layer];
+    var resolved_layer = v.base_layer;
+    if (anim_meta.len > 0u) {
+        if (anim_meta.frametime == 0u) {
+            resolved_layer = v.base_layer + animation_timeline[anim_meta.offset];
+        } else {
+            let frame_idx = animation_timeline[anim_meta.offset + (camera.tick_count % anim_meta.len)];
+            resolved_layer = v.base_layer + frame_idx;
+        }
+    }
+    out.layer = resolved_layer;
+
     out.tint_mode = v.tint_mode;
     out.uv_rot = v.uv_rot;
     out.normal_id = v.normal_id;
@@ -148,9 +175,10 @@ fn fs_pass1_opaque_cutout(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // Effective light level: lit = max(block_light, sky_light * day_factor) [APPROX-RENDERING-03]
+    // Effective light level: lit = max(block_light, eff_sky * day_factor) [APPROX-RENDERING-03]
     let day_factor = 1.0;
-    let lit = max(in.block_light, in.sky_light * day_factor);
+    let eff_sky = max(0.0, in.sky_light - f32(camera.sky_dampen));
+    let lit = max(in.block_light, eff_sky * day_factor);
     let f_light = vanilla_brightness(lit);
 
     // AO factor: 0.4 + 0.2 * ao [APPROX-RENDERING-05]
@@ -177,7 +205,8 @@ fn fs_pass2_translucent(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_color = textureSampleLevel(t_array, s_array, sample_uv, in.layer, 0.0);
 
     let day_factor = 1.0;
-    let lit = max(in.block_light, in.sky_light * day_factor);
+    let eff_sky = max(0.0, in.sky_light - f32(camera.sky_dampen));
+    let lit = max(in.block_light, eff_sky * day_factor);
     let f_light = vanilla_brightness(lit);
     let ao_factor = 0.4 + 0.2 * in.ao;
     let f_cardinal = cardinal_shading(in.normal_id);

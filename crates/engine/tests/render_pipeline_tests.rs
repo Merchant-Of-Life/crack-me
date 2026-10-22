@@ -1415,4 +1415,253 @@ fn test_greedy_quad_axis_rotated_oak_log_4x1() {
     }
 }
 
+#[test]
+fn test_headless_sky_dampen_night_preserves_block_light() {
+    let ctx = match GpuContext::new_headless() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test: no headless GPU available ({})", e);
+            return;
+        }
+    };
+
+    let assets = assets_dir();
+    let textures = TextureArray::from_assets(&ctx.device, &ctx.queue, &assets.join("textures"))
+        .expect("TextureArray from assets");
+
+    let pipelines = TerrainPipelines::new(
+        &ctx.device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Depth24Plus,
+    );
+
+    let registry = BlockRegistry::from_file(&assets.join("registry/block_registry.bin"))
+        .expect("load block_registry.bin");
+    let stone = registry.get_block("stone").expect("stone block");
+    let state = registry.get_state(stone.state_start).unwrap();
+    let stone_layer = state.faces[FACE_UP].base_layer;
+
+    let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
+
+    // Quad A: pure sky (block_light = 0, sky_light = 15) covering [0, 1] x [0, 1] at y = 1
+    let key_sky = FaceMergeKey {
+        base_layer: stone_layer,
+        tint_mode: 0,
+        uv_rot: 0,
+        pass_bucket: 0,
+        corner_ao: [3, 3, 3, 3],
+        corner_sky: [15, 15, 15, 15],
+        corner_block: [0, 0, 0, 0],
+    };
+
+    // Quad B: pure block (block_light = 15, sky_light = 0) covering [1, 2] x [0, 1] at y = 1
+    let key_block = FaceMergeKey {
+        base_layer: stone_layer,
+        tint_mode: 0,
+        uv_rot: 0,
+        pass_bucket: 0,
+        corner_ao: [3, 3, 3, 3],
+        corner_sky: [0, 0, 0, 0],
+        corner_block: [15, 15, 15, 15],
+    };
+
+    let mut vertices = Vec::new();
+    emit_quad(
+        &mut vertices,
+        (0, 1, 0),
+        (0, 1, 1),
+        (1, 1, 1),
+        (1, 1, 0),
+        FACE_UP as u32,
+        &key_sky,
+    );
+    emit_quad(
+        &mut vertices,
+        (1, 1, 0),
+        (1, 1, 1),
+        (2, 1, 1),
+        (2, 1, 0),
+        FACE_UP as u32,
+        &key_block,
+    );
+
+    let target_2x1 = OffscreenTarget::new(&ctx.device, 32, 16);
+
+    let view = glam::Mat4::look_at_rh(
+        glam::vec3(1.0, 5.0, 0.5),
+        glam::vec3(1.0, 1.0, 0.5),
+        glam::vec3(0.0, 0.0, -1.0),
+    );
+    let proj = glam::Mat4::orthographic_rh(-1.0, 1.0, -0.5, 0.5, 0.1, 10.0);
+    let vp = proj * view;
+
+    use wgpu::util::DeviceExt;
+
+    // 1. Render at sky_dampen = 0 (day)
+    let cam_day = CameraUniform::new_full(vp, 0, 0);
+    let buf_day = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("camera_buf_day"),
+        contents: bytemuck::bytes_of(&cam_day),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_day = pipelines.create_camera_bind_group(&ctx.device, &buf_day);
+    let pixels_day = render_quads_to_target(
+        &ctx,
+        &pipelines,
+        &target_2x1,
+        &bind_day,
+        &texture_bind_group,
+        &vertices,
+    );
+
+    // 2. Render at sky_dampen = 15 (night)
+    let cam_night = CameraUniform::new_full(vp, 15, 0);
+    let buf_night = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("camera_buf_night"),
+        contents: bytemuck::bytes_of(&cam_night),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let bind_night = pipelines.create_camera_bind_group(&ctx.device, &buf_night);
+    let pixels_night = render_quads_to_target(
+        &ctx,
+        &pipelines,
+        &target_2x1,
+        &bind_night,
+        &texture_bind_group,
+        &vertices,
+    );
+
+    // Verify Quad A (x in 0..16, pure sky):
+    for y in 0..16 {
+        for x in 0..16 {
+            let idx = (y * 32 + x) * 4;
+            let day_rgb = &pixels_day[idx..idx + 3];
+            let night_rgb = &pixels_night[idx..idx + 3];
+
+            assert!(day_rgb[0] > 0 || day_rgb[1] > 0 || day_rgb[2] > 0);
+            assert!(
+                night_rgb[0] < day_rgb[0] && night_rgb[1] < day_rgb[1] && night_rgb[2] < day_rgb[2],
+                "Pure-sky quad at night must be significantly dimmer than day at ({}, {}): night={:?}, day={:?}",
+                x, y, night_rgb, day_rgb
+            );
+        }
+    }
+
+    // Verify Quad B (x in 16..32, pure block light):
+    for y in 0..16 {
+        for x in 16..32 {
+            let idx = (y * 32 + x) * 4;
+            let day_px = &pixels_day[idx..idx + 4];
+            let night_px = &pixels_night[idx..idx + 4];
+            assert_eq!(
+                day_px, night_px,
+                "Pure-block-light quad must be BYTE-UNCHANGED by sky_dampen at ({}, {})",
+                x, y
+            );
+        }
+    }
+}
+
+#[test]
+fn test_animation_frame_golden() {
+    let ctx = match GpuContext::new_headless() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test: no headless GPU available ({})", e);
+            return;
+        }
+    };
+
+    let assets = assets_dir();
+    let textures = TextureArray::from_assets(&ctx.device, &ctx.queue, &assets.join("textures"))
+        .expect("TextureArray from assets");
+
+    let pipelines = TerrainPipelines::new(
+        &ctx.device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Depth24Plus,
+    );
+
+    let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
+
+    // campfire_fire: base_layer = 176, frametime = 2, timeline_len = 16 ticks
+    let campfire_layer = 176;
+
+    let key_fire = FaceMergeKey {
+        base_layer: campfire_layer,
+        tint_mode: 0,
+        uv_rot: 0,
+        pass_bucket: 0,
+        corner_ao: [3, 3, 3, 3],
+        corner_sky: [15, 15, 15, 15],
+        corner_block: [0, 0, 0, 0],
+    };
+
+    let mut vertices = Vec::new();
+    emit_quad(
+        &mut vertices,
+        (0, 1, 0),
+        (0, 1, 1),
+        (1, 1, 1),
+        (1, 1, 0),
+        FACE_UP as u32,
+        &key_fire,
+    );
+
+    let target_1x1 = OffscreenTarget::new(&ctx.device, 16, 16);
+
+    let view = glam::Mat4::look_at_rh(
+        glam::vec3(0.5, 5.0, 0.5),
+        glam::vec3(0.5, 1.0, 0.5),
+        glam::vec3(0.0, 0.0, -1.0),
+    );
+    let proj = glam::Mat4::orthographic_rh(-0.5, 0.5, -0.5, 0.5, 0.1, 10.0);
+    let vp = proj * view;
+
+    use wgpu::util::DeviceExt;
+
+    let render_at_tick = |tick: u32| -> Vec<u8> {
+        let cam = CameraUniform::new_full(vp, 0, tick);
+        let cam_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera_buf_anim"),
+            contents: bytemuck::bytes_of(&cam),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let cam_bind = pipelines.create_camera_bind_group(&ctx.device, &cam_buf);
+        render_quads_to_target(
+            &ctx,
+            &pipelines,
+            &target_1x1,
+            &cam_bind,
+            &texture_bind_group,
+            &vertices,
+        )
+    };
+
+    let pixels_t0 = render_at_tick(0);
+    let pixels_t1 = render_at_tick(1);
+    let pixels_t2 = render_at_tick(2);
+    let pixels_t16 = render_at_tick(16);
+
+    // In campfire_fire (frametime = 2):
+    // tick 0 and tick 1 should have the same frame (frame index 0)
+    assert_eq!(
+        pixels_t0, pixels_t1,
+        "Campfire fire ticks 0 and 1 must show identical frame (frametime = 2)"
+    );
+
+    // tick 0 vs tick 2 MUST differ (advances to frame index 1)
+    assert_ne!(
+        pixels_t0, pixels_t2,
+        "Campfire fire at tick 0 vs tick 2 (after frametime = 2) must differ"
+    );
+
+    // tick 16 (full cycle length = 16 ticks) MUST return to tick 0 identically!
+    assert_eq!(
+        pixels_t0, pixels_t16,
+        "Campfire fire at tick 16 (after full cycle of 16 ticks) must return identically to tick 0"
+    );
+}
+
+
 
