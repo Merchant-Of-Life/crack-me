@@ -4,6 +4,7 @@ pub mod bfs;
 pub mod light;
 pub mod mesher;
 pub mod registry;
+pub mod render;
 
 pub use bfs::{recompute_light_column, LightComputeResult, NeighborChunkLights, CARDINAL_DIRECTIONS};
 pub use light::{
@@ -1215,6 +1216,40 @@ mod tests {
         for f in [FACE_NORTH, FACE_SOUTH, FACE_EAST, FACE_WEST] {
             assert_eq!(state.faces[f].base_layer, side_layer, "all 4 side faces must match composite layer");
             assert_eq!(state.faces[f].tint_mode, 0, "side faces must have tint_mode 0 to prevent recoloring dirt [APPROX-RENDERING-09]");
+        }
+    }
+
+    #[test]
+    fn test_adapter_limits_validation_seam() {
+        let mut limits = wgpu::Limits::downlevel_defaults();
+
+        // 1. Success when >= 2048
+        limits.max_texture_array_layers = 2048;
+        assert!(render::validate_adapter_limits(&limits).is_ok());
+
+        limits.max_texture_array_layers = 4096;
+        assert!(render::validate_adapter_limits(&limits).is_ok());
+
+        // 2. Descriptive error when < 2048
+        limits.max_texture_array_layers = 256;
+        let err = render::validate_adapter_limits(&limits).unwrap_err();
+        assert!(err.contains("max_texture_array_layers is 256"));
+        assert!(err.contains("required >= 2048"));
+    }
+
+    #[test]
+    fn test_gpu_context_probe() {
+        let ctx_res = render::GpuContext::new_headless();
+        match ctx_res {
+            Ok(ctx) => {
+                let info = ctx.adapter.get_info();
+                println!("Headless Adapter Info: {:?}", info);
+                println!("max_texture_array_layers: {}", ctx.adapter.limits().max_texture_array_layers);
+                assert!(ctx.adapter.limits().max_texture_array_layers >= 2048);
+            }
+            Err(e) => {
+                println!("No headless GPU adapter found in environment: {}", e);
+            }
         }
     }
 }
