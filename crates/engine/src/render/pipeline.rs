@@ -102,7 +102,14 @@ impl TerrainPipelines {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/terrain.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                concat!(
+                    include_str!("shaders/unpack.wgsl"),
+                    "\n",
+                    include_str!("shaders/terrain.wgsl")
+                )
+                .into(),
+            ),
         });
 
         // Group 0: Camera Uniform

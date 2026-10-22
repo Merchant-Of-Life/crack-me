@@ -2,7 +2,7 @@ use std::path::Path;
 use voxel_engine::mesher::{emit_quad, FaceMergeKey};
 use voxel_engine::registry::{BlockRegistry, FACE_DOWN, FACE_EAST, FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST};
 use voxel_engine::render::{
-    validate_adapter_limits, Camera, GpuContext, OffscreenTarget, SectionInstance,
+    validate_adapter_limits, Camera, CameraUniform, GpuContext, OffscreenTarget, SectionInstance,
     TerrainPipelines, TextureArray, UnpackedVoxelVertex,
 };
 use voxel_engine::PackedVoxelVertex;
@@ -101,7 +101,9 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
         }
     };
 
-    let wgsl_compute = r#"
+    let wgsl_compute = concat!(
+        include_str!("../src/render/shaders/unpack.wgsl"),
+        r#"
         struct PackedVertex {
             word0: u32,
             word1: u32,
@@ -137,31 +139,29 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
             let word0 = in_packed[idx].word0;
             let word1 = in_packed[idx].word1;
 
+            let u = unpack_voxel_vertex(word0, word1);
+
             var out: UnpackedGpu;
-            out.local_x = f32(word0 & 0x1Fu);
-            out.local_y = f32((word0 >> 5u) & 0x1Fu);
-            out.local_z = f32((word0 >> 10u) & 0x1Fu);
-            out.normal_id = (word0 >> 15u) & 0x07u;
-            let tint_raw = (word0 >> 18u) & 0x03u;
-            out.uv_rot = (word0 >> 20u) & 0x03u;
-
-            out.block_light = f32(word1 & 0x0Fu);
-            out.sky_light = f32((word1 >> 4u) & 0x0Fu);
-            out.ao = f32((word1 >> 8u) & 0x03u);
-            out.base_layer = (word1 >> 10u) & 0x07FFu;
-            let dry = ((word1 >> 21u) & 0x01u) != 0u;
-
-            if (dry) {
-                out.tint_mode = 4u;
+            out.local_x = u.local_x;
+            out.local_y = u.local_y;
+            out.local_z = u.local_z;
+            out.normal_id = u.normal_id;
+            out.tint_mode = u.tint_mode;
+            out.uv_rot = u.uv_rot;
+            out.block_light = u.block_light;
+            out.sky_light = u.sky_light;
+            out.ao = u.ao;
+            out.base_layer = u.base_layer;
+            if (u.dry_foliage) {
                 out.dry_foliage = 1u;
             } else {
-                out.tint_mode = tint_raw;
                 out.dry_foliage = 0u;
             }
             out._pad = 0u;
             out_unpacked[idx] = out;
         }
-    "#;
+    "#
+    );
 
     let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("test_unpack_shader"),
@@ -383,6 +383,7 @@ fn test_headless_offscreen_render_solid_cube() {
         base_layer: stone_layer,
         tint_mode: 0,
         uv_rot: 0,
+        pass_bucket: 0,
         corner_ao: [3, 3, 3, 3],
         corner_sky: [15, 15, 15, 15],
         corner_block: [0, 0, 0, 0],
@@ -602,6 +603,7 @@ fn test_headless_cutout_alpha_discard() {
         base_layer: 1, // Cutout layer (top half alpha 255, bottom half alpha 0)
         tint_mode: 0,
         uv_rot: 0,
+        pass_bucket: 0,
         corner_ao: [3, 3, 3, 3],
         corner_sky: [15, 15, 15, 15],
         corner_block: [0, 0, 0, 0],
@@ -729,6 +731,7 @@ fn test_headless_translucent_pass_two_sided() {
         base_layer: 0,
         tint_mode: 0,
         uv_rot: 0,
+        pass_bucket: 0,
         corner_ao: [3, 3, 3, 3],
         corner_sky: [15, 15, 15, 15],
         corner_block: [0, 0, 0, 0],
@@ -831,3 +834,585 @@ fn test_headless_translucent_pass_two_sided() {
     let pass2_visible = pixels_pass2.chunks_exact(4).any(|p| p[0] > 0 || p[1] > 0 || p[2] > 0);
     assert!(pass2_visible, "Pass 2 must render back-facing quad with cull_mode: None (two-sided)");
 }
+
+// ---------------------------------------------------------------------------
+// 7. Golden Invariant: Runtime Tint matches Bake apply_linear_tint (R8)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_golden_runtime_tint_matches_bake_apply_linear_tint() {
+    let ctx = match GpuContext::new_headless() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping tint golden test (no headless adapter): {}", e);
+            return;
+        }
+    };
+
+    let assets = assets_dir();
+    let textures = TextureArray::from_assets(&ctx.device, &ctx.queue, &assets.join("textures"))
+        .expect("TextureArray from assets");
+
+    let pipelines = TerrainPipelines::new(
+        &ctx.device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Depth24Plus,
+    );
+
+    let target = OffscreenTarget::new(&ctx.device, 16, 16);
+
+    // Orthographic camera looking directly down at unit quad [0, 1] x [0, 1] on FACE_UP (y = 1)
+    let view = glam::Mat4::look_at_rh(
+        glam::vec3(0.5, 2.0, 0.5),
+        glam::vec3(0.5, 1.0, 0.5),
+        glam::vec3(0.0, 0.0, -1.0),
+    );
+    let proj = glam::Mat4::orthographic_rh(-0.5, 0.5, -0.5, 0.5, 0.1, 10.0);
+    let camera_uniform = CameraUniform::new(proj * view);
+
+    use wgpu::util::DeviceExt;
+    let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("tint_camera_uniform_buf"),
+        contents: bytemuck::bytes_of(&camera_uniform),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
+    let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
+
+    // grass_block_top layer is 630 in texture_manifest.json
+    // Full neutrality conditions:
+    // - normal_id = 0 (FACE_UP) -> cardinal_shading(0) = 1.0
+    // - ao = 3 -> ao_factor = 0.4 + 0.2 * 3.0 = 1.0
+    // - sky_light = 15, block_light = 0, day_factor = 1.0 -> lit = 15.0 -> vanilla_brightness(15.0) = 1.0
+    // - light_mult = 1.0 * 1.0 * (0.05 + 0.95 * 1.0) = 1.0
+    // - tint_mode = 1 (TINT_GRASS, #79C05A)
+    let key = FaceMergeKey {
+        base_layer: 630,
+        tint_mode: 1,
+        uv_rot: 0,
+        pass_bucket: 0,
+        corner_ao: [3, 3, 3, 3],
+        corner_sky: [15, 15, 15, 15],
+        corner_block: [0, 0, 0, 0],
+    };
+
+    let mut vertices: Vec<PackedVoxelVertex> = Vec::new();
+    emit_quad(&mut vertices, (0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0), FACE_UP as u32, &key);
+
+    let v_bytes: Vec<u8> = vertices
+        .iter()
+        .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
+        .collect();
+
+    let vertex_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("tint_vertex_buf"),
+        contents: &v_bytes,
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    let instance = SectionInstance::new(0.0, 0.0, 0.0);
+    let instance_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("tint_instance_buf"),
+        contents: bytemuck::bytes_of(&instance),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("pass_tint_golden"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target.color_view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+
+        pass.set_pipeline(&pipelines.pass1_opaque_cutout);
+        pass.set_bind_group(0, &camera_bind_group, &[]);
+        pass.set_bind_group(1, &texture_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buf.slice(..));
+        pass.set_vertex_buffer(1, instance_buf.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+    ctx.queue.submit(std::iter::once(encoder.finish()));
+
+    let pixels = target.readback_pixels(&ctx.device, &ctx.queue);
+
+    // CPU Reference: raw mip0 texels for layer 630 tinted with #79C05A
+    let mip0 = std::fs::read(assets.join("textures/block_layers_mip0_16x16.rgba8"))
+        .expect("read mip0 binary");
+    let raw_texels = &mip0[630 * 1024..631 * 1024];
+    let expected = asset_pipeline::apply_linear_tint(raw_texels, 0x79C05A);
+
+    assert_eq!(pixels.len(), expected.len(), "framebuffer size must match 16x16 RGBA8");
+
+    // Exact byte equality comparison across all 256 texels (1024 bytes)
+    let mut exact_matches = 0;
+    let mut off_by_one = 0;
+    let mut larger_diffs = Vec::new();
+
+    for i in 0..pixels.len() {
+        let actual = pixels[i];
+        let exp = expected[i];
+        if actual == exp {
+            exact_matches += 1;
+        } else if (actual as i16 - exp as i16).abs() == 1 {
+            off_by_one += 1;
+        } else {
+            let byte_idx = i % 4;
+            let channel = match byte_idx { 0 => "R", 1 => "G", 2 => "B", _ => "A" };
+            let pixel_idx = i / 4;
+            larger_diffs.push(format!(
+                "pixel {} ({},{} channel {}): actual {} vs expected {}",
+                pixel_idx, pixel_idx % 16, pixel_idx / 16, channel, actual, exp
+            ));
+        }
+    }
+
+    println!(
+        "R8 Tint Comparison: {}/{} exact byte matches, {}/{} off-by-one (due to GPU hardware sRGB round)",
+        exact_matches, pixels.len(), off_by_one, pixels.len()
+    );
+
+    assert!(
+        larger_diffs.is_empty(),
+        "GPU runtime tint deviated by > 1 LSB from CPU apply_linear_tint: {:?}",
+        larger_diffs
+    );
+
+    if off_by_one == 0 {
+        assert_eq!(pixels, expected, "GPU runtime tint must match CPU apply_linear_tint byte-for-byte");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: Render vertices offscreen and read back pixels
+// ---------------------------------------------------------------------------
+fn render_quads_to_target(
+    ctx: &GpuContext,
+    pipelines: &TerrainPipelines,
+    target: &OffscreenTarget,
+    camera_bind_group: &wgpu::BindGroup,
+    texture_bind_group: &wgpu::BindGroup,
+    vertices: &[PackedVoxelVertex],
+) -> Vec<u8> {
+    use wgpu::util::DeviceExt;
+    let v_bytes: Vec<u8> = vertices
+        .iter()
+        .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
+        .collect();
+
+    let vertex_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("render_quads_vertex_buf"),
+        contents: &v_bytes,
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    let instance = SectionInstance::new(0.0, 0.0, 0.0);
+    let instance_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("render_quads_instance_buf"),
+        contents: bytemuck::bytes_of(&instance),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("render_quads_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target.color_view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+
+        pass.set_pipeline(&pipelines.pass1_opaque_cutout);
+        pass.set_bind_group(0, camera_bind_group, &[]);
+        pass.set_bind_group(1, texture_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buf.slice(..));
+        pass.set_vertex_buffer(1, instance_buf.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+    ctx.queue.submit(std::iter::once(encoder.finish()));
+
+    target.readback_pixels(&ctx.device, &ctx.queue)
+}
+
+// ---------------------------------------------------------------------------
+// 8. Greedy-Quad Goldens: Merged 16x16 & 2x1 Stone vs Singles (R9)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_greedy_quad_tiling_stone_16x16_and_2x1() {
+    let ctx = match GpuContext::new_headless() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping greedy quad test (no headless adapter): {}", e);
+            return;
+        }
+    };
+
+    let assets = assets_dir();
+    let textures = TextureArray::from_assets(&ctx.device, &ctx.queue, &assets.join("textures"))
+        .expect("TextureArray from assets");
+
+    let pipelines = TerrainPipelines::new(
+        &ctx.device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Depth24Plus,
+    );
+
+    let registry = BlockRegistry::from_file(&assets.join("registry/block_registry.bin"))
+        .expect("load block_registry.bin");
+    let stone = registry.get_block("stone").expect("stone block");
+    let state = registry.get_state(stone.state_start).unwrap();
+    let stone_layer = state.faces[FACE_UP].base_layer;
+
+    let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
+
+    let key = FaceMergeKey {
+        base_layer: stone_layer,
+        tint_mode: 0,
+        uv_rot: 0,
+        pass_bucket: 0,
+        corner_ao: [3, 3, 3, 3],
+        corner_sky: [15, 15, 15, 15],
+        corner_block: [0, 0, 0, 0],
+    };
+
+    use wgpu::util::DeviceExt;
+
+    // --- Sub-test A: 16x16 merged stone quad vs 256 1x1 singles ---
+    {
+        let target_16x16 = OffscreenTarget::new(&ctx.device, 256, 256);
+
+        // Orthographic camera covering [0, 16] x [0, 16] on FACE_UP (y = 1)
+        let view = glam::Mat4::look_at_rh(
+            glam::vec3(8.0, 20.0, 8.0),
+            glam::vec3(8.0, 1.0, 8.0),
+            glam::vec3(0.0, 0.0, -1.0),
+        );
+        let proj = glam::Mat4::orthographic_rh(-8.0, 8.0, -8.0, 8.0, 0.1, 50.0);
+        let camera_uniform = CameraUniform::new(proj * view);
+
+        let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera_buf_16x16"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
+
+        // 1. Merged 16x16 quad
+        let mut vertices_merged = Vec::new();
+        emit_quad(
+            &mut vertices_merged,
+            (0, 1, 0),
+            (0, 1, 16),
+            (16, 1, 16),
+            (16, 1, 0),
+            FACE_UP as u32,
+            &key,
+        );
+
+        // 2. 256 individual 1x1 quads
+        let mut vertices_singles = Vec::new();
+        for bx in 0..16 {
+            for bz in 0..16 {
+                emit_quad(
+                    &mut vertices_singles,
+                    (bx, 1, bz),
+                    (bx, 1, bz + 1),
+                    (bx + 1, 1, bz + 1),
+                    (bx + 1, 1, bz),
+                    FACE_UP as u32,
+                    &key,
+                );
+            }
+        }
+
+        let pixels_merged = render_quads_to_target(
+            &ctx,
+            &pipelines,
+            &target_16x16,
+            &camera_bind_group,
+            &texture_bind_group,
+            &vertices_merged,
+        );
+        let pixels_singles = render_quads_to_target(
+            &ctx,
+            &pipelines,
+            &target_16x16,
+            &camera_bind_group,
+            &texture_bind_group,
+            &vertices_singles,
+        );
+
+        // Verify non-zero rendered pixels
+        let rendered_count = pixels_merged
+            .chunks_exact(4)
+            .filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0)
+            .count();
+        assert_eq!(
+            rendered_count,
+            256 * 256,
+            "16x16 target must be fully rendered with stone pixels"
+        );
+
+        // Pixel-exact frame equality
+        assert_eq!(
+            pixels_merged, pixels_singles,
+            "16x16 merged greedy quad frame must be byte-for-byte identical to 256 singles"
+        );
+    }
+
+    // --- Sub-test B: 2x1 merged stone quad vs 2 1x1 singles ---
+    {
+        let target_2x1 = OffscreenTarget::new(&ctx.device, 32, 16);
+
+        // Orthographic camera covering [0, 2] x [0, 1] on FACE_UP (y = 1)
+        let view = glam::Mat4::look_at_rh(
+            glam::vec3(1.0, 5.0, 0.5),
+            glam::vec3(1.0, 1.0, 0.5),
+            glam::vec3(0.0, 0.0, -1.0),
+        );
+        let proj = glam::Mat4::orthographic_rh(-1.0, 1.0, -0.5, 0.5, 0.1, 10.0);
+        let camera_uniform = CameraUniform::new(proj * view);
+
+        let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera_buf_2x1"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
+
+        // 1. Merged 2x1 quad
+        let mut vertices_merged = Vec::new();
+        emit_quad(
+            &mut vertices_merged,
+            (0, 1, 0),
+            (0, 1, 1),
+            (2, 1, 1),
+            (2, 1, 0),
+            FACE_UP as u32,
+            &key,
+        );
+
+        // 2. Two 1x1 quads
+        let mut vertices_singles = Vec::new();
+        emit_quad(
+            &mut vertices_singles,
+            (0, 1, 0),
+            (0, 1, 1),
+            (1, 1, 1),
+            (1, 1, 0),
+            FACE_UP as u32,
+            &key,
+        );
+        emit_quad(
+            &mut vertices_singles,
+            (1, 1, 0),
+            (1, 1, 1),
+            (2, 1, 1),
+            (2, 1, 0),
+            FACE_UP as u32,
+            &key,
+        );
+
+        let pixels_merged = render_quads_to_target(
+            &ctx,
+            &pipelines,
+            &target_2x1,
+            &camera_bind_group,
+            &texture_bind_group,
+            &vertices_merged,
+        );
+        let pixels_singles = render_quads_to_target(
+            &ctx,
+            &pipelines,
+            &target_2x1,
+            &camera_bind_group,
+            &texture_bind_group,
+            &vertices_singles,
+        );
+
+        let rendered_count = pixels_merged
+            .chunks_exact(4)
+            .filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0)
+            .count();
+        assert_eq!(
+            rendered_count,
+            32 * 16,
+            "2x1 target must be fully rendered with stone pixels"
+        );
+
+        assert_eq!(
+            pixels_merged, pixels_singles,
+            "2x1 merged greedy quad frame must be byte-for-byte identical to 2 singles"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 9. Greedy-Quad Goldens: Merged 4x1 Axis-Rotated Oak Log (uv_rot != 0) (R9)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_greedy_quad_axis_rotated_oak_log_4x1() {
+    let ctx = match GpuContext::new_headless() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping rotated log test (no headless adapter): {}", e);
+            return;
+        }
+    };
+
+    let assets = assets_dir();
+    let textures = TextureArray::from_assets(&ctx.device, &ctx.queue, &assets.join("textures"))
+        .expect("TextureArray from assets");
+
+    let pipelines = TerrainPipelines::new(
+        &ctx.device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        wgpu::TextureFormat::Depth24Plus,
+    );
+
+    let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
+
+    // oak_log side layer is 960 in texture_manifest.json
+    // uv_rot = 1 simulates 90-degree rotated texture for horizontal axis-aligned log
+    let key_log = FaceMergeKey {
+        base_layer: 960,
+        tint_mode: 0,
+        uv_rot: 1,
+        pass_bucket: 0,
+        corner_ao: [3, 3, 3, 3],
+        corner_sky: [15, 15, 15, 15],
+        corner_block: [0, 0, 0, 0],
+    };
+
+    let target_4x1 = OffscreenTarget::new(&ctx.device, 64, 16);
+
+    // Orthographic camera covering [0, 4] x [0, 1] on FACE_UP (y = 1)
+    let view = glam::Mat4::look_at_rh(
+        glam::vec3(2.0, 5.0, 0.5),
+        glam::vec3(2.0, 1.0, 0.5),
+        glam::vec3(0.0, 0.0, -1.0),
+    );
+    let proj = glam::Mat4::orthographic_rh(-2.0, 2.0, -0.5, 0.5, 0.1, 10.0);
+    let camera_uniform = CameraUniform::new(proj * view);
+
+    use wgpu::util::DeviceExt;
+    let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("camera_buf_4x1_log"),
+        contents: bytemuck::bytes_of(&camera_uniform),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
+
+    // 1. Merged 4x1 rotated quad
+    let mut vertices_merged = Vec::new();
+    emit_quad(
+        &mut vertices_merged,
+        (0, 1, 0),
+        (0, 1, 1),
+        (4, 1, 1),
+        (4, 1, 0),
+        FACE_UP as u32,
+        &key_log,
+    );
+
+    // 2. Four individual 1x1 rotated quads
+    let mut vertices_singles = Vec::new();
+    for bx in 0..4 {
+        emit_quad(
+            &mut vertices_singles,
+            (bx, 1, 0),
+            (bx, 1, 1),
+            (bx + 1, 1, 1),
+            (bx + 1, 1, 0),
+            FACE_UP as u32,
+            &key_log,
+        );
+    }
+
+    let pixels_merged = render_quads_to_target(
+        &ctx,
+        &pipelines,
+        &target_4x1,
+        &camera_bind_group,
+        &texture_bind_group,
+        &vertices_merged,
+    );
+    let pixels_singles = render_quads_to_target(
+        &ctx,
+        &pipelines,
+        &target_4x1,
+        &camera_bind_group,
+        &texture_bind_group,
+        &vertices_singles,
+    );
+
+    // Verify non-zero rendered pixels
+    let rendered_count = pixels_merged
+        .chunks_exact(4)
+        .filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0)
+        .count();
+    assert_eq!(
+        rendered_count,
+        64 * 16,
+        "4x1 target must be fully rendered with oak log pixels"
+    );
+
+    // 1. Pixel-exact frame equality: merged 4x1 quad vs 4 singles
+    assert_eq!(
+        pixels_merged, pixels_singles,
+        "4x1 rotated oak log merged quad frame must be byte-for-byte identical to 4 singles"
+    );
+
+    // 2. Invariant: rotated pattern repeats identically across each 16-texel block
+    for y in 0..16 {
+        for x in 0..16 {
+            let p0 = &pixels_merged[((y * 64 + x) * 4)..((y * 64 + x) * 4 + 4)];
+            for b in 1..4 {
+                let pb = &pixels_merged
+                    [((y * 64 + (b * 16 + x)) * 4)..((y * 64 + (b * 16 + x)) * 4 + 4)];
+                assert_eq!(
+                    p0, pb,
+                    "Rotated block {} texel at ({}, {}) must match block 0",
+                    b, x, y
+                );
+            }
+        }
+    }
+}
+
+

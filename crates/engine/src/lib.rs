@@ -879,7 +879,7 @@ mod tests {
 
         // Verify all 6 directions are present
         let mut normal_counts = [0usize; 6];
-        for v in &mesh.vertices {
+        for v in &mesh.opaque {
             normal_counts[v.normal_id() as usize] += 1;
         }
         for (i, count) in normal_counts.iter().enumerate() {
@@ -926,7 +926,7 @@ mod tests {
 
         let mesh = mesh_section(&halo, &reg);
         // Find UP faces (normal_id == 0)
-        let up_vertices: Vec<_> = mesh.vertices.iter().filter(|v| v.normal_id() == 0).collect();
+        let up_vertices: Vec<_> = mesh.opaque.iter().filter(|v| v.normal_id() == 0).collect();
         // UP faces must NOT merge into a single quad because the light step at x=8 splits them
         assert!(up_vertices.len() > 6, "UP faces must not merge across light step boundary");
     }
@@ -937,6 +937,7 @@ mod tests {
             base_layer: 100,
             tint_mode: 0,
             uv_rot: 0,
+            pass_bucket: 0,
             corner_ao: [1, 3, 3, 3], // corner 0 in shadow
             corner_sky: [15, 15, 15, 15],
             corner_block: [0, 0, 0, 0],
@@ -1112,6 +1113,7 @@ mod tests {
             base_layer: 1,
             tint_mode: 0,
             uv_rot: 0,
+            pass_bucket: 0,
             corner_ao: [3, 3, 3, 3], // symmetric -> flip = false
             corner_sky: [15, 15, 15, 15],
             corner_block: [0, 0, 0, 0],
@@ -1121,6 +1123,7 @@ mod tests {
             base_layer: 1,
             tint_mode: 0,
             uv_rot: 0,
+            pass_bucket: 0,
             corner_ao: [1, 3, 3, 3], // d02 (4) < d13 (6) -> flip = true
             corner_sky: [15, 15, 15, 15],
             corner_block: [0, 0, 0, 0],
@@ -1251,5 +1254,55 @@ mod tests {
                 println!("No headless GPU adapter found in environment: {}", e);
             }
         }
+    }
+
+    #[test]
+    fn test_render_layer_auto_split_stone_and_water() {
+        let reg = load_oracle_registry();
+        let stone_id = state_id_of(&reg, "stone");
+        let water_id = state_id_of(&reg, "water");
+        let air_id = state_id_of(&reg, "air");
+
+        let stone_state = reg.get_state(stone_id as u32).unwrap();
+        let water_state = reg.get_state(water_id as u32).unwrap();
+        assert_eq!(stone_state.render_layer(), LAYER_SOLID, "stone must be LAYER_SOLID (0)");
+        assert_eq!(water_state.render_layer(), LAYER_TRANSLUCENT, "water must be LAYER_TRANSLUCENT (3)");
+
+        let mut halo = SectionHalo::new();
+        // Section: bottom half (y=0..8) stone, top half (y=8..16) water, surrounded by air
+        for z in -1..=16 {
+            for x in -1..=16 {
+                for y in -1..=16 {
+                    if (0..8).contains(&y) && (0..16).contains(&x) && (0..16).contains(&z) {
+                        halo.set_voxel(x, y, z, stone_id);
+                    } else if (8..16).contains(&y) && (0..16).contains(&x) && (0..16).contains(&z) {
+                        halo.set_voxel(x, y, z, water_id);
+                    } else {
+                        halo.set_voxel(x, y, z, air_id);
+                    }
+                }
+            }
+        }
+
+        let mesh = mesh_section(&halo, &reg);
+
+        // Assert both pass streams are populated
+        assert!(!mesh.opaque.is_empty(), "opaque stream must contain stone quads");
+        assert!(!mesh.translucent.is_empty(), "translucent stream must contain water quads");
+
+        let stone_layer = stone_state.faces[FACE_UP].base_layer;
+        let water_layer = water_state.faces[FACE_UP].base_layer;
+
+        // Verify clean segregation: NO water in opaque, NO stone in translucent
+        for v in &mesh.opaque {
+            assert_eq!(v.base_layer(), stone_layer as u32, "mesh.opaque must only contain stone quads");
+        }
+        for v in &mesh.translucent {
+            assert_eq!(v.base_layer(), water_layer as u32, "mesh.translucent must only contain water quads");
+        }
+
+        // Verify total vertices and combined view
+        assert_eq!(mesh.vertex_count(), mesh.opaque.len() + mesh.translucent.len());
+        assert_eq!(mesh.combined().len(), mesh.vertex_count());
     }
 }

@@ -38,26 +38,10 @@ struct VertexOutput {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // Bit-exact unpack per SPECS §4:
-    let local_x = f32(in.word0 & 0x1Fu);
-    let local_y = f32((in.word0 >> 5u) & 0x1Fu);
-    let local_z = f32((in.word0 >> 10u) & 0x1Fu);
-    let normal_id = (in.word0 >> 15u) & 0x07u;
-    let tint_mode_raw = (in.word0 >> 18u) & 0x03u;
-    let uv_rot = (in.word0 >> 20u) & 0x03u;
+    // Bit-exact unpack using shared unpack.wgsl:
+    let v = unpack_voxel_vertex(in.word0, in.word1);
 
-    let block_light = f32(in.word1 & 0x0Fu);
-    let sky_light = f32((in.word1 >> 4u) & 0x0Fu);
-    let ao = f32((in.word1 >> 8u) & 0x03u);
-    let base_layer = (in.word1 >> 10u) & 0x07FFu;
-    let dry_foliage = ((in.word1 >> 21u) & 0x01u) != 0u;
-
-    var tint_mode = tint_mode_raw;
-    if (dry_foliage) {
-        tint_mode = 4u;
-    }
-
-    let world_pos = in.world_offset + vec3<f32>(local_x, local_y, local_z);
+    let world_pos = in.world_offset + vec3<f32>(v.local_x, v.local_y, v.local_z);
     out.clip_position = camera.view_proj * vec4<f32>(world_pos, 1.0);
 
     // UV Axis Mapping from SPECS §8:
@@ -68,35 +52,35 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     // FACE_EAST (+X, 4): U = 1.0 - z, V = 1.0 - y
     // FACE_WEST (-X, 5): U = z, V = 1.0 - y
     var raw_uv: vec2<f32>;
-    switch (normal_id) {
+    switch (v.normal_id) {
         case 0u: { // FACE_UP (+Y)
-            raw_uv = vec2<f32>(local_x, local_z);
+            raw_uv = vec2<f32>(v.local_x, v.local_z);
         }
         case 1u: { // FACE_DOWN (-Y)
-            raw_uv = vec2<f32>(local_x, 1.0 - local_z);
+            raw_uv = vec2<f32>(v.local_x, 1.0 - v.local_z);
         }
         case 2u: { // FACE_SOUTH (+Z)
-            raw_uv = vec2<f32>(local_x, 1.0 - local_y);
+            raw_uv = vec2<f32>(v.local_x, 1.0 - v.local_y);
         }
         case 3u: { // FACE_NORTH (-Z)
-            raw_uv = vec2<f32>(1.0 - local_x, 1.0 - local_y);
+            raw_uv = vec2<f32>(1.0 - v.local_x, 1.0 - v.local_y);
         }
         case 4u: { // FACE_EAST (+X)
-            raw_uv = vec2<f32>(1.0 - local_z, 1.0 - local_y);
+            raw_uv = vec2<f32>(1.0 - v.local_z, 1.0 - v.local_y);
         }
         default: { // 5u, FACE_WEST (-X)
-            raw_uv = vec2<f32>(local_z, 1.0 - local_y);
+            raw_uv = vec2<f32>(v.local_z, 1.0 - v.local_y);
         }
     }
 
     out.uv = raw_uv;
-    out.layer = base_layer;
-    out.tint_mode = tint_mode;
-    out.uv_rot = uv_rot;
-    out.normal_id = normal_id;
-    out.ao = ao;
-    out.block_light = block_light;
-    out.sky_light = sky_light;
+    out.layer = v.base_layer;
+    out.tint_mode = v.tint_mode;
+    out.uv_rot = v.uv_rot;
+    out.normal_id = v.normal_id;
+    out.ao = v.ao;
+    out.block_light = v.block_light;
+    out.sky_light = v.sky_light;
 
     return out;
 }
@@ -124,18 +108,18 @@ fn cardinal_shading(normal_id: u32) -> f32 {
     }
 }
 
-// Tint constants from SPECS §7:
+// Linear tint constants from SPECS §7 (Requirement R8):
 // 0: vec3(1.0, 1.0, 1.0)
-// 1 (TINT_GRASS): #79C05A -> vec3(0.4745, 0.7529, 0.3529)
-// 2 (TINT_FOLIAGE): #59C93C -> vec3(0.3490, 0.7882, 0.2353)
-// 3 (TINT_WATER): #3F76E4 -> vec3(0.2471, 0.4627, 0.8941)
-// 4 (TINT_DRY_FOLIAGE): #929786 -> vec3(0.5725, 0.5922, 0.5255)
+// 1 (TINT_GRASS): #79C05A -> vec3(0.1912017, 0.5271151, 0.1022417)
+// 2 (TINT_FOLIAGE): #59C93C -> vec3(0.0998987, 0.5840784, 0.0451862)
+// 3 (TINT_WATER): #3F76E4 -> vec3(0.0497066, 0.1811642, 0.7758222)
+// 4 (TINT_DRY_FOLIAGE): #929786 -> vec3(0.2874408, 0.3094689, 0.2383976)
 fn evaluate_tint(tint_mode: u32) -> vec3<f32> {
     switch (tint_mode) {
-        case 1u: { return vec3<f32>(0.4745098, 0.7529412, 0.3529412); }
-        case 2u: { return vec3<f32>(0.3490196, 0.7882353, 0.2352941); }
-        case 3u: { return vec3<f32>(0.2470588, 0.4627451, 0.8941176); }
-        case 4u: { return vec3<f32>(0.5725490, 0.5921569, 0.5254902); }
+        case 1u: { return vec3<f32>(0.1912017, 0.5271151, 0.1022417); }
+        case 2u: { return vec3<f32>(0.0998987, 0.5840784, 0.0451862); }
+        case 3u: { return vec3<f32>(0.0497066, 0.1811642, 0.7758222); }
+        case 4u: { return vec3<f32>(0.2874408, 0.3094689, 0.2383976); }
         default: { return vec3<f32>(1.0, 1.0, 1.0); }
     }
 }
