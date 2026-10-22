@@ -432,3 +432,106 @@ flowchart TD
     
     Step3 --> Step4["Step 4: wgpu Graphics Pipeline & Window<br/>• Safe adapter limit validation (needed <= adapter_max)<br/>• Upload 5 mip levels to Texture2DArray<br/>• Timeline storage buffer & Camera UBO<br/>• WGSL shader with day-factor lighting & dynamic colormaps"]
 ```
+
+---
+
+## 6. Step 4: wgpu Graphics Pipeline & Rendering Architecture
+
+### 1. Initialization, Feature Limits & Headless Contract
+- **Required Hardware Limits**:
+  - `wgpu::Limits::max_texture_array_layers >= 2048`.
+  - The engine checks `adapter.limits().max_texture_array_layers` before requesting device; if `< 2048`, it emits a loud, descriptive failure (`panic!` with required vs actual limits) rather than failing during texture upload.
+- **Headless Test Contract**:
+  - All automated tests (`cargo test`) must execute headlessly with ZERO window creation and zero `$DISPLAY` / Wayland dependencies.
+  - Tests request a headless `wgpu::Adapter` (`compatible_surface: None`), render into offscreen `Texture` targets (`RENDER_ATTACHMENT | COPY_SRC`), and read back via staging buffers (`MAP_READ | COPY_DST`) to verify vertex unpacking, rasterization, depth, and lighting.
+
+### 2. Dual-Pass Render Architecture & V1 Approximations
+- **Pass 1: Opaque + Cutout (Single Pass)**:
+  - Depth write enabled: `depth_write_enabled: true`, `depth_compare: wgpu::CompareFunction::LessEqual`.
+  - Blend state: none (`write_mask: ALL`).
+  - Fragment shader: cutout alpha discard `if (color.a < 0.1) { discard; }`.
+  - Renders all solid blocks and cutout geometry (leaves, saplings, grates, flowers) into the depth buffer in a single pass.
+- **Pass 2: Translucent (Second Pass)**:
+  - Depth write disabled: `depth_write_enabled: false`, `depth_compare: wgpu::CompareFunction::LessEqual`.
+  - Blend state: standard alpha blending (`src: SrcAlpha`, `dst: OneMinusSrcAlpha`, `op: Add`).
+  - Renders all translucent geometry (water, stained glass, ice).
+- **V1 Approximations**:
+  - `[APPROX-RENDERING-01]` **Translucent Sorting Skip**: Translucent quads and sections are rendered without per-quad depth sorting.
+  - `[APPROX-RENDERING-02]` **Cutout Alpha Threshold**: Fixed at `alpha < 0.1` in fragment shader.
+
+### 3. Per-Section World Placement (`SectionInstance`)
+- `PackedVoxelVertex` coordinates are strictly 5-bit section-local: $x, y, z \in [0, 16]$.
+- Each section is placed in world space via an instanced world offset buffer:
+  ```rust
+  #[repr(C)]
+  #[derive(Copy, Clone, Debug, Pod, Zeroable)]
+  pub struct SectionInstance {
+      pub world_offset: [f32; 3], // (chunk_x * 16, section_base_y, chunk_z * 16)
+      pub _pad: u32,
+  }
+  ```
+  bound at `wgpu::VertexStepMode::Instance`.
+- World coordinate in vertex shader:
+  $$\vec{p}_{\text{world}} = \vec{\text{offset}}_{\text{world}} + \begin{pmatrix} \text{local\_x} \\ \text{local\_y} \\ \text{local\_z} \end{pmatrix}$$
+  $$\vec{p}_{\text{clip}} = \mathbf{M}_{\text{view\_proj}} \cdot \begin{pmatrix} \vec{p}_{\text{world}} \\ 1.0 \end{pmatrix}$$
+
+### 4. WGSL Bit-Exact Unpack & CPU Reference Debug Harness
+- **Shader Vertex Layout**:
+  ```wgsl
+  struct VertexInput {
+      @location(0) word0: u32,
+      @location(1) word1: u32,
+      @location(2) world_offset: vec3<f32>,
+  };
+  ```
+- **Bit-Exact WGSL Extraction**:
+  - `local_x = f32(in.word0 & 0x1Fu)`
+  - `local_y = f32((in.word0 >> 5u) & 0x1Fu)`
+  - `local_z = f32((in.word0 >> 10u) & 0x1Fu)`
+  - `normal_id = (in.word0 >> 15u) & 0x07u`
+  - `tint_mode = (in.word0 >> 18u) & 0x03u`
+  - `uv_rot = (in.word0 >> 20u) & 0x03u`
+  - `block_light = f32(in.word1 & 0x0Fu)`
+  - `sky_light = f32((in.word1 >> 4u) & 0x0Fu)`
+  - `ao = f32((in.word1 >> 8u) & 0x03u)`
+  - `base_layer = (in.word1 >> 10u) & 0x07FFu`
+  - `dry_foliage = ((in.word1 >> 21u) & 0x01u) != 0u`
+- **CPU Reference Mirror (`UnpackedVoxelVertex`)**:
+  A CPU struct `UnpackedVoxelVertex::from_packed(PackedVoxelVertex)` mirrors the shader unpack bit-for-bit.
+  A headless shader unpack golden test asserts 100% numerical identity before any visual render passes are evaluated.
+
+### 5. Lighting Model, Brightness Curve, & Directional Shading
+- **Vanilla Brightness Curve**:
+  For normalized light $L = \text{lit} / 15.0 \in [0.0, 1.0]$:
+  $$f(L) = \frac{L}{4.0 - 3.0 \cdot L}$$
+- **Effective Light Level (`lit`)**:
+  $$\text{lit} = \max(\text{block\_light}, \text{sky\_light} \cdot \text{day\_factor})$$
+  where `day_factor` is a frame uniform scalar $\in [0.0, 1.0]$ matching `LevelLightEngine` (`max(block, sky - dampen)`).
+- **Directional Face Shading (Vanilla `getDirectionalBrightness`)**:
+  - `+Y` (top, `normal_id == 0`): `1.0`
+  - `-Y` (bottom, `normal_id == 1`): `0.5`
+  - `±Z` (north/south, `normal_id == 2, 3`): `0.8`
+  - `±X` (east/west, `normal_id == 4, 5`): `0.6`
+- **Ambient Occlusion Curve**:
+  $$\text{ao\_factor} = 0.4 + 0.2 \cdot ao \quad (\implies [0.4, 0.6, 0.8, 1.0] \text{ for } ao \in 0..3)$$
+- **Combined Light Value**:
+  $$\text{light\_mult} = \text{FACE\_SHADE}[\text{normal\_id}] \cdot \text{ao\_factor} \cdot (0.05 + 0.95 \cdot f(L))$$
+
+### 6. Camera, Coordinate Convention, & Backface Culling
+- Right-handed coordinate system: $+X$ East, $+Y$ Up, $-Z$ North / forward (in Minecraft world coordinates: $+Z$ is South, $-Z$ is North).
+- Camera view matrix: `glam::Mat4::look_at_rh(eye, center, vec3(0.0, 1.0, 0.0))`.
+- Camera projection: `glam::Mat4::perspective_rh(fov_y, aspect, z_near, z_far)` with $[0, 1]$ depth.
+- Front Face & Culling:
+  - `front_face: wgpu::FrontFace::Ccw`
+  - `cull_mode: Some(wgpu::Face::Back)`
+  - Consistent with the 24/24 CCW winding normal goldens locked in Step 3.
+
+### 7. Tints & Dynamic Colormaps
+- Dynamic tinting evaluates in fragment shader:
+  - `dry_foliage` flag (Word 1 bit 21 == 1) routes to dry foliage tint (`#929786` for `pale_oak_leaves`).
+  - Otherwise `tint_mode`:
+    - `0`: None (`vec3(1.0, 1.0, 1.0)`).
+    - `1`: Grass colormap lookup / biome tint.
+    - `2`: Foliage colormap lookup / biome tint.
+    - `3`: Water tint (`#3F76E4` default biome water color).
+
