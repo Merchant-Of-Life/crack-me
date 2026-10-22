@@ -4,43 +4,61 @@ This document contains mathematically verified invariants, physics equations, gr
 
 ---
 
-## 1. Physics & Movement Dynamics (20 Hz Fixed Tick)
+## 1. Physics & Movement Dynamics (20 Hz Fixed Tick) [pinned 2026-10-23, review pass 5B-R1]
 
-All simulation ticks run at a fixed $\Delta t = 0.05\text{ s}$ (20 ticks per second).
+> Decompile-verified against `minecraft-26.3-client.jar` (Vineflower, `~/.minecraft-decomp/src/`). Citations are `Class:lines`. This section supersedes the pre-decompile sketch it previously carried (ground-accel constant and terminal-velocity formula were corrected; the speed rows, per-tick sequence, restitution, step-up, negligible-velocity, and viewer-integration subsections are new from review).
 
-### Core Constants
-- **Base Gravity**: $0.08\text{ blocks/tick}^2$ (`Attributes.GRAVITY = 0.08`)
-- **Base Jump Impulse**: $0.42\text{ blocks/tick}$ (`Attributes.JUMP_STRENGTH = 0.42F`)
-- **Sprint Jump Boost**: $+0.2\text{ blocks/tick}$ added horizontally in facing direction:
-  $$\Delta v_x = -\sin(\theta) \cdot 0.2, \quad \Delta v_z = \cos(\theta) \cdot 0.2$$
-- **Vertical Air Drag**: $0.98\text{ per tick}$ ($0.9800000190734863$)
-- **Terminal Fall Velocity**: $\approx 3.92\text{ blocks/tick}$ ($\frac{0.08}{1.0 - 0.98}$)
-- **Horizontal Air Drag**: $0.91\text{ per tick}$
-- **Default Block Friction**: $0.6\text{ (air/standard blocks)}$
-- **Effective Ground Friction**: $0.6 \times 0.91 = 0.546\text{ per tick}$
-- **Ice Friction**: $0.98 \implies \text{effective friction } = 0.98 \times 0.91 = 0.8918$
-- **Ground Acceleration Factor**:
-  $$\text{speed\_factor} = \begin{cases} 
-  \frac{0.216}{\mu_{\text{block}}^3} & \text{if } \mu_{\text{block}} > 0.6 \\
-  1.0 & \text{otherwise}
-  \end{cases}$$
-- **Fluid Drag**:
-  - Water: $0.80\text{ velocity multiplier}$
-  - Lava: $0.50\text{ velocity multiplier}$
+All simulation runs at a fixed dt = 0.05 s (20 Hz). Physics state is f64 (`DVec3`); only the camera consumes f32 at eye = pos + (0, 1.62, 0).
 
-### Player Dimensions & Bounding Box
-- **Width**: $0.6\text{ blocks}$
-- **Height (Standing)**: $1.8\text{ blocks}$
-- **Eye Height**: $1.62\text{ blocks}$
-- **Max Step-Up Height**: $0.6\text{ blocks}$ (`Attributes.STEP_HEIGHT = 0.6`)
-- **Relative AABB**: $[-0.3, 0.0, -0.3]$ to $[0.3, 1.8, 0.3]$
+### Core constants (26.3 oracle)
+| Constant | Value | Citation |
+|---|---|---|
+| Gravity | 0.08 | `Attributes.java:56-58` |
+| Jump impulse | 0.42, applied as vy = max(power, vy) | `Attributes.java:59-61`, `LivingEntity.java:2377-2403` |
+| Sprint-jump boost | +0.2 in facing direction, same tick as jump | `LivingEntity.java:2397-2400` |
+| Vertical drag | 0.98, gravity applied first: vy' = (vy - 0.08) * 0.98 | `LivingEntity.java:210, 2465-2498` |
+| Horizontal drag | ground: mu * 0.91; air: 0.91; applied once per tick, after move | `LivingEntity.java:209, 2493-2497` |
+| Terminal fall velocity | -3.92 blocks/tick (v* = -0.08 * 0.98 / (1 - 0.98)) | derived from drag pair |
+| Walk speed | 0.1 — player override; the 0.7 registry default is generic-entities-only | `Player.java:213`, `Attributes.java:78-80` |
+| Sprint speed | 0.1 * 1.3 = 0.13 (modifier +0.3, ADD_MULTIPLIED_TOTAL) | `LivingEntity.java:168` |
+| Air steering speed | 0.02 walk / 0.025999999 sprint | `Player.java:1873-1877` |
+| Ground accel factor | mu > 0.6 ? speed * (0.21600002 / mu^3) : speed (note: exact float 0.21600002F, not 0.216) | `LivingEntity.java:2723-2729` |
+| Collision epsilon | 1.0E-7 | `Shapes.java:23` |
+| Negligible velocity | player: horizontalDistanceSqr < 9.0E-6 -> vx = vz = 0; all entities: \|vy\| < 0.003 -> vy = 0 (the per-axis \|v\| < 0.003 rule at 3075-3081 is NON-player) — runs at aiStep prologue, before input | `LivingEntity.java:175, 3062-3088` |
+| Friction probe | block below sampled at y - 0.500001 | `Entity.java:217, 1102` |
+| Fluid multipliers (reference, not 5B scope) | water 0.8, lava 0.5 (+ shallow-lava vertical 0.8) | `LivingEntity.java:211-213` |
+| Restitution | zero on every colliding axis (player never bounces) | `Entity.java:857-898` |
+| Ground latch | onGround = yCollision && requested dy < 0, recomputed every move | `Entity.java:1193-1194` |
 
-### Collision Resolution Order (AABB Sweep)
-Collision must be resolved axis-by-axis against neighboring voxel bounding boxes. To prevent corner clipping and sticky corners, modern 26.3 uses dynamic axis ordering:
-$$\text{Axis Order} = \begin{cases}
-[Y, Z, X] & \text{if } |\Delta x| < |\Delta z| \\
-[Y, X, Z] & \text{otherwise}
-\end{cases}$$
+- [APPROX-PHYSICS-01] Uniform ground friction 0.6 for every solid block this step (ice-family 0.98/0.989 deferred; `BlockStateEntry.pad[2]` is the reserved byte for real per-block friction later — do NOT rebake for 5B). Access goes through a `friction_at(x,y,z)` hook defaulting to 0.6.
+- [APPROX-PHYSICS-02] Fluids are pass-through this step: no buoyancy, no in-fluid drag or fluid-specific travel; falling into water/lava just does not collide.
+- [APPROX-PHYSICS-03] Sprint == LControl held. Vanilla sprint-persistence nuances are out of scope.
+
+### Player dimensions & bounding box
+- Width 0.6, height 1.8, eye height 1.62 — `EntityTypes.java:1105-1115` (PLAYER registration; beware nearby rows like Villager/WanderingTrader at `EntityTypes.java:978, 991` which share eye height 1.62 but are 1.95 tall).
+- Relative AABB: [-0.3, 0.0, -0.3] .. [0.3, 1.8, 0.3] around foot position pos; eye at pos.y + 1.62.
+- Step-up ceiling: maxUpStep = STEP_HEIGHT attribute default = 0.6 (`Attributes.java:99-101`).
+
+### Per-tick sequence (ordering verified in decompile)
+1. aiStep prologue: negligible-velocity zeroing (table row above) runs BEFORE input.
+2. Input applied; jump handled in aiStep before travel, gated by onGround && noJumpDelay == 0 (`LivingEntity.java:3111-3117`): vy = max(jumpPower, vy), plus +0.2 * forward when sprinting. Standard ground jumps carry no cooldown, so held Space repeats on landing [APPROX-PHYSICS-03: auto-rejump same tick as landing].
+3. travel: moveRelative adds input acceleration — accel is getFrictionInfluencedSpeed(mu) when onGround (still the pre-move latch), else getFlyingSpeed(); input goes through getInputVector semantics (deadzone lengthSqr < 1e-7 -> zero; lengthSqr > 1 -> normalize) (`Entity.java:1802-1812`, `LivingEntity.java:2680`).
+4. move() resolves AABB per-axis (below), zeroes each colliding axis velocity, recomputes onGround.
+5. Post-move (travelInAir): horizontal *= (mu * 0.91 on ground, 0.91 in air); vertical = (vy - 0.08) * 0.98.
+
+### Collision resolution & step-up
+- Axis order is dynamic, Y always first: |dx| < |dz| -> [Y, Z, X], else [Y, X, Z] (`Direction.java:48-49, 389`).
+- Sweep is capped-sweep against voxel AABBs where `is_solid(state) == true` only; non-solid (air, torch, grass, leaf_litter, water, lava) never blocks (solid gating via BlockRegistry).
+- Step-up: only when (landed-this-move || onGround) && horizontal collision; candidates = collider top faces relative to box minY, <= 0.6, excluding the already-achieved Y offset; each candidate replays the horizontal move from the grounded box; accepted only if it strictly improves horizontal progress; landing position is reset by minus the candidate climbing offset (`Entity.java:1196-1250`; the grounded-box negative nudge is -1.0E-5).
+
+### Viewer integration contract (5B)
+- Single tick source: the same accumulator loop advances physics ticks AND camera.tick_count (20 Hz animation clock must stay in lockstep with logic ticks). Accumulator capped at 5 substeps per frame; excess is discarded (spiral-of-death guard).
+- F toggles [PHYSICS] / [FLY]. Launch default = [PHYSICS].
+- [PHYSICS] keys: W/S = forward/back, A/D = left/right, Space = jump (hold rebinding ok), LControl = sprint (vanilla 0.13 speed — NOT the fly-mode *2.5). LShift has no effect. [FLY] keeps the 8625f86 contract unchanged (incl. Space ascend / LShift descend / LControl sprint).
+- Input matrix (viewer-convention equivalent of Java getInputVector with theta = -phi, phi = viewer yaw radians): deadzone/normalize as above; delta = s*(cos phi, 0, -sin phi) + f*(sin phi, 0, cos phi), where s = +1 on A (Java local-x is positive LEFT — this burned us once, keep it pinned) and f = +1 on W. Sprint-jump boost = 0.2 * forward in this convention, identical to Java's (-sin theta, cos theta).
+- Spawn: player starts above the showcase floor at grid center and lands under physics.
+
+Citations reference the Vineflower decompile of `minecraft-26.3-client.jar` (`~/.local/share/PrismLauncher/libraries/com/mojang/minecraft/26.3/`); SPECS.md remains the sole in-repo oracle — decompiles are spec-side only.
 
 ---
 
