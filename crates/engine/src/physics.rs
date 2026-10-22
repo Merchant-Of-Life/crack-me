@@ -242,6 +242,10 @@ pub struct PlayerInput {
 pub struct PlayerPhysicsState {
     /// Foot position in world space.
     pub pos: DVec3,
+    /// Foot position at the start of the current tick ([APPROX-VIEW-01]: captured
+    /// on the first line of every tick so the renderer can interpolate the camera
+    /// between 20 Hz ticks — vanilla `partialTicks` semantics).
+    pub prev_pos: DVec3,
     /// Velocity vector (blocks/tick).
     pub vel: DVec3,
     /// Ground latch (recomputed every move).
@@ -254,16 +258,26 @@ impl PlayerPhysicsState {
     pub fn new(pos: DVec3) -> Self {
         Self {
             pos,
+            prev_pos: pos,
             vel: DVec3::ZERO,
             on_ground: false,
             is_sprinting: false,
         }
     }
 
-    /// Camera eye position: `pos + (0, 1.62, 0)`.
+    /// Camera eye position at this exact tick boundary: `pos + (0, 1.62, 0)`.
     #[inline(always)]
     pub fn eye_pos(&self) -> DVec3 {
         DVec3::new(self.pos.x, self.pos.y + EYE_HEIGHT, self.pos.z)
+    }
+
+    /// [APPROX-VIEW-01] Camera eye interpolated between the previous tick boundary
+    /// and the current one: `lerp(prev_pos, pos, alpha) + (0, 1.62, 0)`. `alpha`
+    /// clamps to [0, 1] (viewer feeds `tick_accumulator / 0.05` each render frame).
+    #[inline(always)]
+    pub fn interpolated_eye_pos(&self, alpha: f64) -> DVec3 {
+        let alpha = alpha.clamp(0.0, 1.0);
+        self.prev_pos.lerp(self.pos, alpha) + DVec3::new(0.0, EYE_HEIGHT, 0.0)
     }
 
     /// Player bounding box.
@@ -463,6 +477,10 @@ pub fn tick_player(
     input: &PlayerInput,
     world: &impl VoxelWorldCollision,
 ) {
+    // [APPROX-VIEW-01] Capture the pre-tick position FIRST (renderer interpolates
+    // the camera between this and the end-of-tick position).
+    state.prev_pos = state.pos;
+
     // --- 1. aiStep prologue: negligible-velocity zeroing ---
     // Player horizontal: horizontalDistanceSqr < 9.0E-6 -> vx = vz = 0
     if state.vel.x * state.vel.x + state.vel.z * state.vel.z < PLAYER_NEGLIGIBLE_HORIZ_SQ {
@@ -971,5 +989,45 @@ mod tests {
         // vx and vz zeroed in prologue before post-move drag
         assert_eq!(state.vel.x, 0.0);
         assert_eq!(state.vel.z, 0.0);
+    }
+
+    #[test]
+    fn test_prev_pos_and_interpolated_eye() {
+        // [APPROX-VIEW-01]: prev_pos is captured at the first line of every tick and
+        // the renderer interpolates eye = lerp(prev_pos, pos, alpha) + (0, 1.62, 0).
+        let world = EmptyWorld;
+        let mut state = PlayerPhysicsState::new(DVec3::new(0.0, 10.0, 0.0));
+        let input = PlayerInput::default();
+
+        tick_player(&mut state, &input, &world); // t1: dy = 0, vy = -0.0784
+        tick_player(&mut state, &input, &world); // t2: dy = -0.0784
+
+        // prev_pos must be the position at the START of t2 (== post-t1 pos).
+        assert!(
+            (state.prev_pos.y - 10.0).abs() < 1e-9,
+            "prev_pos must capture the pre-tick foot position (got {})",
+            state.prev_pos.y
+        );
+        assert!(
+            (state.pos.y - (10.0 - 0.0784)).abs() < 1e-9,
+            "pos must be post-move (got {})",
+            state.pos.y
+        );
+
+        // Interpolated eye: alpha 0.5 is the exact midpoint + eye height.
+        let mid = state.interpolated_eye_pos(0.5);
+        let expected_y = 10.0 - 0.0784 * 0.5 + EYE_HEIGHT;
+        assert!(
+            (mid.y - expected_y).abs() < 1e-9,
+            "alpha=0.5 must be the exact midpoint + eye (got {}, want {})",
+            mid.y,
+            expected_y
+        );
+        // Clamp semantics: alpha 0 -> previous boundary, oversized alpha -> current.
+        assert_eq!(state.interpolated_eye_pos(0.0), DVec3::new(0.0, 10.0 + EYE_HEIGHT, 0.0));
+        assert!(
+            (state.interpolated_eye_pos(1.5).y - (10.0 - 0.0784 + EYE_HEIGHT)).abs() < 1e-9,
+            "alpha must clamp to 1.0"
+        );
     }
 }
