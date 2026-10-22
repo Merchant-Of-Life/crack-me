@@ -169,9 +169,49 @@ struct AppState {
     world: ViewerWorld,
     tick_accumulator: f64,
     tick_count: u32,
+    // User-adopted QoL (pinned 2026-10-23, SPECS §1 [APPROX-PHYSICS-03]):
+    // double-tap-W sprint latch, double-tap-Space mode toggle (0.30 s window).
+    last_w_press: Option<Instant>,
+    last_space_press: Option<Instant>,
+    sprint_by_double_tap: bool,
+    // Sprint FOV modifier target smoothing from 1.0 -> 1.15 ([APPROX-VIEW-02]).
+    fov_mult: f32,
 }
 
 impl AppState {
+    /// [APPROX-PHYSICS-03] Mode switch FLY -> PHYSICS with camera-spot continuity:
+    /// foot position = camera eye minus eye height, velocity and ground latch reset,
+    /// and prev_pos = pos so the interpolated camera has no one-frame streak.
+    fn enter_physics(&mut self) {
+        self.player_physics.pos = glam::DVec3::new(
+            self.camera_pos.x as f64,
+            (self.camera_pos.y - EYE_HEIGHT as f32) as f64,
+            self.camera_pos.z as f64,
+        );
+        self.player_physics.prev_pos = self.player_physics.pos;
+        self.player_physics.vel = glam::DVec3::ZERO;
+        self.player_physics.on_ground = false;
+        self.sprint_by_double_tap = false;
+        self.movement_mode = MovementMode::Physics;
+        println!("Movement mode: [PHYSICS]");
+    }
+
+    /// [APPROX-PHYSICS-03] Mode switch PHYSICS -> FLY (noclip spectator; camera spot
+    /// is continuous because FLY drives camera_pos in place).
+    fn enter_fly(&mut self) {
+        self.sprint_by_double_tap = false;
+        self.movement_mode = MovementMode::Fly;
+        println!("Movement mode: [FLY]");
+    }
+
+    /// F key and double-tap-Space share this toggle (user-adopted QoL, 0.30 s window).
+    fn toggle_mode(&mut self) {
+        match self.movement_mode {
+            MovementMode::Physics => self.enter_fly(),
+            MovementMode::Fly => self.enter_physics(),
+        }
+    }
+
     fn set_cursor_grab(&mut self, grab: bool) {
         if grab {
             match self.window.set_cursor_grab(CursorGrabMode::Locked) {
@@ -528,6 +568,10 @@ impl AppState {
             world,
             tick_accumulator: 0.0,
             tick_count: 0,
+            last_w_press: None,
+            last_space_press: None,
+            sprint_by_double_tap: false,
+            fov_mult: 1.0,
         })
     }
 
@@ -558,13 +602,21 @@ impl AppState {
         let mut substeps = 0;
         while self.tick_accumulator >= 0.05 && substeps < 5 {
             if self.movement_mode == MovementMode::Physics {
+                // [APPROX-PHYSICS-03] sprint composition (user-adopted QoL over the
+                // vanilla-strict LControl floor): LControl | LShift (PHYSICS only,
+                // vanilla Shift = sneak — removed when sneak lands) | double-tap-W
+                // latch (cleared on W release). Must pair with forward input W.
+                let sprint_held = self.keys_pressed.contains(&KeyCode::ControlLeft)
+                    || self.keys_pressed.contains(&KeyCode::ShiftLeft)
+                    || self.keys_pressed.contains(&KeyCode::ShiftRight)
+                    || self.sprint_by_double_tap;
                 let input = PlayerInput {
                     forward: self.keys_pressed.contains(&KeyCode::KeyW),
                     backward: self.keys_pressed.contains(&KeyCode::KeyS),
                     left: self.keys_pressed.contains(&KeyCode::KeyA),
                     right: self.keys_pressed.contains(&KeyCode::KeyD),
                     jump: self.keys_pressed.contains(&KeyCode::Space),
-                    sprint: self.keys_pressed.contains(&KeyCode::ControlLeft),
+                    sprint: sprint_held && self.keys_pressed.contains(&KeyCode::KeyW),
                     yaw: self.camera_yaw as f64,
                 };
                 tick_player(&mut self.player_physics, &input, &self.world);
@@ -575,11 +627,11 @@ impl AppState {
         }
 
         if self.movement_mode == MovementMode::Physics {
-            self.camera_pos = glam::vec3(
-                self.player_physics.pos.x as f32,
-                (self.player_physics.pos.y + EYE_HEIGHT) as f32,
-                self.player_physics.pos.z as f32,
-            );
+            // [APPROX-VIEW-01] Sub-tick camera interpolation (vanilla partialTicks
+            // semantics): sample between the tick boundaries at frame granularity.
+            let alpha = (self.tick_accumulator / 0.05).clamp(0.0, 1.0);
+            let eye = self.player_physics.interpolated_eye_pos(alpha);
+            self.camera_pos = glam::vec3(eye.x as f32, eye.y as f32, eye.z as f32);
         } else {
             // [FLY] mode keeps the 8625f86 / 45e6edc contract unchanged
             let dt_f32 = (dt as f32).min(0.1);
@@ -614,6 +666,21 @@ impl AppState {
                 self.camera_pos.y -= speed;
             }
         }
+
+        // [APPROX-VIEW-02] Sprint FOV kick. Modifier verified from the release jar —
+        // AbstractClientPlayer.getFieldOfViewModifier (AbstractClientPlayer.java:85-107,
+        // decompiled 2026-10-23): walk-sprint speed ratio 0.13/0.1 -> (1.3 + 1)/2 = 1.15
+        // exactly. FLY keeps 1.0 (the x2.5 noclip rate is not a vanilla ratio — the
+        // formula must NOT be ported literally there). Smoothing is viewer-side.
+        let target = if self.movement_mode == MovementMode::Physics
+            && self.player_physics.is_sprinting
+        {
+            1.15
+        } else {
+            1.0
+        };
+        let t = 1.0 - ((-dt.min(0.1) * 12.0).exp() as f32);
+        self.fov_mult += (target - self.fov_mult) * t;
     }
 
     fn render(&mut self) -> Result<(), &'static str> {
@@ -639,7 +706,7 @@ impl AppState {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let aspect = (self.config.width as f32) / (self.config.height as f32).max(1.0);
-        let fov_y = 70.0f32.to_radians();
+        let fov_y = (70.0 * self.fov_mult).to_radians();
         let proj = glam::Mat4::perspective_rh(fov_y, aspect, 0.1, 1000.0);
 
         let (pitch_sin, pitch_cos) = self.camera_pitch.sin_cos();
@@ -736,7 +803,13 @@ impl AppState {
                 self.startup_line_printed = true;
             }
             let mode_str = match self.movement_mode {
-                MovementMode::Physics => "PHYSICS",
+                MovementMode::Physics => {
+                    if self.player_physics.is_sprinting {
+                        "PHYSICS | SPRINT"
+                    } else {
+                        "PHYSICS"
+                    }
+                }
                 MovementMode::Fly => "FLY",
             };
             let title = format!(
@@ -855,28 +928,47 @@ impl ApplicationHandler for ViewerApp {
                         }
                         // F toggles [PHYSICS] / [FLY]
                         KeyCode::KeyF => {
-                            state.movement_mode = match state.movement_mode {
-                                MovementMode::Physics => {
-                                    println!("Movement mode: [FLY]");
-                                    MovementMode::Fly
-                                }
-                                MovementMode::Fly => {
-                                    state.player_physics.pos = glam::DVec3::new(
-                                        state.camera_pos.x as f64,
-                                        (state.camera_pos.y - EYE_HEIGHT as f32) as f64,
-                                        state.camera_pos.z as f64,
-                                    );
-                                    state.player_physics.vel = glam::DVec3::ZERO;
-                                    state.player_physics.on_ground = false;
-                                    println!("Movement mode: [PHYSICS]");
-                                    MovementMode::Physics
-                                }
-                            };
+                            state.toggle_mode();
+                        }
+                        // User-adopted QoL (SPECS §1 [APPROX-PHYSICS-03], pinned
+                        // 2026-10-23): double-tap W latches PHYSICS sprint; double-tap
+                        // Space toggles [PHYSICS]/[FLY] (vanilla-creative style).
+                        // Window 0.30 s; watches are cleared to avoid triple-taps.
+                        KeyCode::KeyW => {
+                            let now = Instant::now();
+                            let double_tap = state
+                                .last_w_press
+                                .take()
+                                .is_some_and(|t| now.duration_since(t).as_secs_f64() < 0.30);
+                            if double_tap && state.movement_mode == MovementMode::Physics {
+                                state.sprint_by_double_tap = true;
+                                state.last_w_press = None;
+                            } else {
+                                state.last_w_press = Some(now);
+                            }
+                        }
+                        KeyCode::Space => {
+                            let now = Instant::now();
+                            let double_tap = state
+                                .last_space_press
+                                .take()
+                                .is_some_and(|t| now.duration_since(t).as_secs_f64() < 0.30);
+                            if double_tap {
+                                state.toggle_mode();
+                                state.last_space_press = None;
+                            } else {
+                                state.last_space_press = Some(now);
+                            }
                         }
                         _ => {}
                     }
                 } else {
                     state.keys_pressed.remove(&key_code);
+                    // Releasing W stops the double-tap sprint latch (sprint requires
+                    // forward input; also matches vanilla stop-sprint-on-stop-forward).
+                    if key_code == KeyCode::KeyW {
+                        state.sprint_by_double_tap = false;
+                    }
                 }
             }
             WindowEvent::RedrawRequested => {
