@@ -126,20 +126,11 @@ fn parse_weathering_copper_prefixes(decomp_dir: &Path) -> Vec<String> {
         }
     }
     eprintln!(
-        "\n⚠️  [DIAGNOSTIC WARNING] WeatheringCopperCollection.java not found at {:?} or failed to parse!\n\
-         Falling back to static prefixes. Run Vineflower decompile to prevent coverage shrinkage.\n",
+        "\n❌ [FATAL ERROR] Required oracle file WeatheringCopperCollection.java not found at {:?} or failed to parse PREFIXES!\n\
+         Decompile from release jar via Vineflower into ~/.minecraft-decomp/src/ to continue.\n",
         coll_path
     );
-    vec![
-        "".to_string(),
-        "exposed_".to_string(),
-        "weathered_".to_string(),
-        "oxidized_".to_string(),
-        "waxed_".to_string(),
-        "waxed_exposed_".to_string(),
-        "waxed_weathered_".to_string(),
-        "waxed_oxidized_".to_string(),
-    ]
+    std::process::exit(1);
 }
 
 fn parse_copper_block_special_names(decomp_dir: &Path) -> Vec<String> {
@@ -172,16 +163,11 @@ fn parse_copper_block_special_names(decomp_dir: &Path) -> Vec<String> {
         }
     }
     eprintln!(
-        "\n⚠️  [DIAGNOSTIC WARNING] BlockItemIds.java not found at {:?} or failed to parse!\n\
-         Falling back to static special names. Run Vineflower decompile to prevent coverage shrinkage.\n",
+        "\n❌ [FATAL ERROR] Required oracle file BlockItemIds.java not found at {:?} or failed to parse COPPER_BLOCK_SPECIAL_NAMES!\n\
+         Decompile from release jar via Vineflower into ~/.minecraft-decomp/src/ to continue.\n",
         ids_path
     );
-    vec![
-        "copper_block".to_string(),
-        "copper".to_string(),
-        "copper".to_string(),
-        "copper".to_string(),
-    ]
+    std::process::exit(1);
 }
 
 /// Block name from the registration FIELD (left side of `=`). Field names track the
