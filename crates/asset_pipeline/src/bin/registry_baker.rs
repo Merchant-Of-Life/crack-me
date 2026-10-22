@@ -354,6 +354,7 @@ const WATER_TINT_BLOCKS: &[&str] = &["water", "bubble_column", "water_cauldron"]
 const DRY_FOLIAGE_TINT_BLOCKS: &[&str] = &["leaf_litter"];
 
 /// Blocks whose first tint layer is BLANK (untinted): petals stay natural color.
+#[allow(dead_code)]
 const BLANK_FIRST_BLOCKS: &[&str] = &["pink_petals", "wildflowers"];
 
 #[derive(Debug, Clone, Copy)]
@@ -437,20 +438,67 @@ pub enum Emission {
     PropMap { prop: String, map: BTreeMap<String, u8>, #[serde(default)] decl: String },
 }
 
-#[derive(Clone, Debug, Default, serde::Deserialize)]
-pub struct BlockProps {
+#[derive(serde::Deserialize)]
+struct RawBlockProps {
     #[serde(default)]
     pub emission: BTreeMap<String, Emission>,
     #[serde(default)]
     pub no_occlusion: BTreeSet<String>,
     #[serde(default)]
     pub skylight: BTreeSet<String>,
+    #[serde(default)]
+    pub cull_classes: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BlockProps {
+    pub emission: BTreeMap<String, Emission>,
+    pub no_occlusion: BTreeSet<String>,
+    pub skylight: BTreeSet<String>,
+    pub cull_classes: BTreeMap<String, u8>,
 }
 
 impl BlockProps {
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let text = std::fs::read_to_string(path)?;
-        Ok(serde_json::from_str(&text)?)
+        let raw: RawBlockProps = serde_json::from_str(&text)?;
+
+        let mut class_to_id: BTreeMap<String, u8> = BTreeMap::new();
+        class_to_id.insert("leaves".to_string(), 1);
+        class_to_id.insert("water".to_string(), 2);
+        class_to_id.insert("lava".to_string(), 3);
+        let mut next_id = 4u8;
+
+        let mut distinct: Vec<String> = raw
+            .cull_classes
+            .values()
+            .filter(|s| !class_to_id.contains_key(*s))
+            .cloned()
+            .collect();
+        distinct.sort();
+        distinct.dedup();
+
+        for c in distinct {
+            class_to_id.insert(c, next_id);
+            next_id = next_id.checked_add(1).expect("cull_class id overflow");
+        }
+
+        let mut cull_classes = BTreeMap::new();
+        for (block, cls) in raw.cull_classes {
+            let id = class_to_id.get(&cls).copied().unwrap_or(0);
+            cull_classes.insert(block, id);
+        }
+
+        Ok(Self {
+            emission: raw.emission,
+            no_occlusion: raw.no_occlusion,
+            skylight: raw.skylight,
+            cull_classes,
+        })
+    }
+
+    pub fn cull_class(&self, block: &str) -> u8 {
+        self.cull_classes.get(block).copied().unwrap_or(0)
     }
 
     fn is_fluid(block: &str) -> bool {
@@ -720,6 +768,7 @@ pub fn bake(
                 let empty = BTreeMap::new();
                 entry.light_emission = props.emission_row(&name, &empty, false);
                 entry.light_filter = props.light_filter(&name, MESH_FLUID);
+                entry.pad[0] = props.cull_class(&name);
                 states.push(entry);
             } else if let Some(Value::Object(variants)) = bs.get("variants") {
                 // Expand property combinations for mesh-relevant states.
@@ -796,6 +845,7 @@ pub fn bake(
             let empty = BTreeMap::new();
             entry.light_emission = props.emission_row(&name, &empty, true);
             entry.light_filter = props.light_filter(&name, mesh_type);
+            entry.pad[0] = props.cull_class(&name);
             states.push(entry);
         }
 
@@ -836,7 +886,7 @@ struct VariantValue {
     model: String,
     x: i32,
     y: i32,
-    uvlock: bool,
+    _uvlock: bool,
 }
 
 impl VariantValue {
@@ -846,7 +896,7 @@ impl VariantValue {
             model: e.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string(),
             x: e.get("x").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
             y: e.get("y").and_then(|y| y.as_i64()).unwrap_or(0) as i32,
-            uvlock: e.get("uvlock").and_then(|u| u.as_bool()).unwrap_or(false),
+            _uvlock: e.get("uvlock").and_then(|u| u.as_bool()).unwrap_or(false),
         }
     }
 }
@@ -955,6 +1005,7 @@ fn cube_state_row(
     entry.is_solid = is_solid(mesh_type);
     entry.light_emission = block_props.emission_row(block, vals, false);
     entry.light_filter = block_props.light_filter(block, mesh_type);
+    entry.pad[0] = block_props.cull_class(block);
 
     let tint = tint_decision(block);
     let tint_mode = match tint {

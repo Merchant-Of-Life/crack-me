@@ -11,10 +11,13 @@ pub use light::{
     MAX_Y, MIN_Y, SECTION_COUNT, SECTION_SIZE, SECTION_VOXELS,
 };
 pub use mesher::{
-    HorizontalNeighbors, OptionalHorizontalNeighbors, SectionHalo, HALO_SIZE, HALO_VOXELS,
+    compute_corner, emit_quad, mesh_section, mesh_section_into, mesh_section_with_neighbors,
+    should_cull_face, FaceMergeKey, HorizontalNeighbors, MeshResult, OptionalHorizontalNeighbors,
+    SectionHalo, HALO_SIZE, HALO_VOXELS,
 };
 pub use registry::{
-    BlockIndexEntry, BlockRegistry, BlockStateEntry, FaceInfo, RegistryError, FACE_DOWN, FACE_EAST,
+    BlockIndexEntry, BlockRegistry, BlockStateEntry, FaceInfo, RegistryError, CULL_LAVA,
+    CULL_LEAVES, CULL_OPAQUE, CULL_TRANSPARENT_START, CULL_WATER, FACE_DOWN, FACE_EAST,
     FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST, MESH_COMPLEX, MESH_CROSS, MESH_CUBE, MESH_EMPTY,
     MESH_FLUID,
 };
@@ -43,6 +46,7 @@ pub struct PackedVoxelVertex {
 }
 
 impl PackedVoxelVertex {
+    #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     pub fn new(
         x: u32,
@@ -746,5 +750,224 @@ mod tests {
                 assert_eq!(halo_top.get_packed_light(x, 16, z), 0xF0, "ceiling light clamp (sky 15)");
             }
         }
+    }
+
+    #[test]
+    fn test_cull_classes_pale_oak_fluids_glass_ice() {
+        let reg = load_oracle_registry();
+        let pale_oak_id = state_id_of(&reg, "pale_oak_leaves");
+        let oak_id = state_id_of(&reg, "oak_leaves");
+        let water_id = state_id_of(&reg, "water");
+        let lava_id = state_id_of(&reg, "lava");
+        let glass_id = state_id_of(&reg, "glass");
+        let ice_id = state_id_of(&reg, "ice");
+        let stone_id = state_id_of(&reg, "stone");
+        let air_id = state_id_of(&reg, "air");
+
+        let pale_oak = reg.get_state_unchecked(pale_oak_id as u32);
+        let oak = reg.get_state_unchecked(oak_id as u32);
+        let water = reg.get_state_unchecked(water_id as u32);
+        let lava = reg.get_state_unchecked(lava_id as u32);
+        let glass = reg.get_state_unchecked(glass_id as u32);
+        let ice = reg.get_state_unchecked(ice_id as u32);
+        let stone = reg.get_state_unchecked(stone_id as u32);
+        let air = reg.get_state_unchecked(air_id as u32);
+
+        // 1. Pale oak leaves are LeavesBlock (cull_class = CULL_LEAVES) and do NOT cull internal canopy
+        assert_eq!(pale_oak.cull_class(), CULL_LEAVES);
+        assert_eq!(oak.cull_class(), CULL_LEAVES);
+        assert!(!should_cull_face(pale_oak, pale_oak), "pale_oak | pale_oak must not cull");
+        assert!(!should_cull_face(pale_oak, oak), "pale_oak | oak must not cull");
+
+        // 2. Water & lava are distinct cull classes and render BOTH boundaries
+        assert_eq!(water.cull_class(), CULL_WATER);
+        assert_eq!(lava.cull_class(), CULL_LAVA);
+        assert!(!should_cull_face(water, lava), "water | lava renders both");
+        assert!(!should_cull_face(lava, water), "lava | water renders both");
+
+        // 3. Same fluid culls internal faces
+        assert!(should_cull_face(water, water), "water | water must cull");
+        assert!(should_cull_face(lava, lava), "lava | lava must cull");
+
+        // 4. Glass & Ice are distinct transparent cull classes and render both boundaries
+        assert!(glass.cull_class() >= CULL_TRANSPARENT_START);
+        assert!(ice.cull_class() >= CULL_TRANSPARENT_START);
+        assert_ne!(glass.cull_class(), ice.cull_class());
+        assert!(!should_cull_face(glass, ice), "glass | ice renders both");
+        assert!(!should_cull_face(ice, glass), "ice | glass renders both");
+
+        // 5. Identical transparent blocks cull
+        assert!(should_cull_face(glass, glass), "glass | glass must cull");
+        assert!(should_cull_face(ice, ice), "ice | ice must cull");
+
+        // 6. Opaque stone interactions
+        assert!(should_cull_face(stone, stone), "stone | stone culls");
+        assert!(!should_cull_face(stone, air), "stone | air does not cull");
+        assert!(!should_cull_face(stone, glass), "stone | glass does not cull (stone visible through glass)");
+        assert!(should_cull_face(glass, stone), "glass | stone culls (stone occludes glass face)");
+    }
+
+    #[test]
+    fn test_corner_lighting_sealed_and_glowstone() {
+        let reg = load_oracle_registry();
+        let glowstone_id = state_id_of(&reg, "glowstone");
+        let stone_id = state_id_of(&reg, "stone");
+        let air_id = state_id_of(&reg, "air");
+
+        // 1. Glowstone-wall corner keeps 15
+        let mut halo = SectionHalo::new();
+        halo.set_voxel(5, 1, 5, air_id);
+        halo.set_packed_light(5, 1, 5, 0x0F);
+        halo.set_voxel(4, 1, 5, glowstone_id);
+        halo.set_packed_light(4, 1, 5, 0x0F);
+        halo.set_voxel(5, 1, 4, air_id);
+        halo.set_packed_light(5, 1, 4, 0x0F);
+        halo.set_voxel(4, 1, 4, air_id);
+        halo.set_packed_light(4, 1, 4, 0x0F);
+
+        let (_ao, sky, blk) = compute_corner(&halo, &reg, (5, 1, 5), (4, 1, 5), (5, 1, 4), (4, 1, 4));
+        assert_eq!(sky, 0);
+        assert_eq!(blk, 15, "glowstone-wall corner keeps 15");
+
+        // 2. Torch-near-wall not darkened:
+        halo.set_voxel(5, 1, 5, air_id);
+        halo.set_packed_light(5, 1, 5, 0x0E);
+        halo.set_voxel(4, 1, 5, stone_id);
+        halo.set_packed_light(4, 1, 5, 0x00);
+        halo.set_voxel(5, 1, 4, air_id);
+        halo.set_packed_light(5, 1, 4, 0x0E);
+        halo.set_voxel(4, 1, 4, air_id);
+        halo.set_packed_light(4, 1, 4, 0x0E);
+
+        let (_ao, _sky, blk) = compute_corner(&halo, &reg, (5, 1, 5), (4, 1, 5), (5, 1, 4), (4, 1, 4));
+        assert_eq!(blk, 14, "torch-near-wall not darkened by solid stone wall");
+    }
+
+    #[test]
+    fn test_greedy_mesh_solid_16_cube_merges_to_6_quads() {
+        let reg = load_oracle_registry();
+        let stone_id = state_id_of(&reg, "stone");
+        let air_id = state_id_of(&reg, "air");
+
+        let mut halo = SectionHalo::new();
+        // Fill 16³ interior with stone
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    halo.set_voxel(x, y, z, stone_id);
+                    halo.set_packed_light(x, y, z, 0x00);
+                }
+            }
+        }
+        // Fill halo border with air and uniform sky 15
+        for y in -1..=16 {
+            for z in -1..=16 {
+                for x in -1..=16 {
+                    if x == -1 || x == 16 || y == -1 || y == 16 || z == -1 || z == 16 {
+                        halo.set_voxel(x, y, z, air_id);
+                        halo.set_packed_light(x, y, z, 0xF0);
+                    }
+                }
+            }
+        }
+
+        let mesh = mesh_section(&halo, &reg);
+        // Exactly 6 faces * 1 quad each = 6 quads = 36 vertices
+        assert_eq!(mesh.quad_count(), 6, "16³ solid cube must merge to exactly 6 quads");
+        assert_eq!(mesh.vertex_count(), 36, "16³ solid cube must produce exactly 36 vertices");
+
+        // Verify all 6 directions are present
+        let mut normal_counts = [0usize; 6];
+        for v in &mesh.vertices {
+            normal_counts[v.normal_id() as usize] += 1;
+        }
+        for (i, count) in normal_counts.iter().enumerate() {
+            assert_eq!(*count, 6, "normal {} must have exactly 1 quad (6 vertices)", i);
+        }
+    }
+
+    #[test]
+    fn test_greedy_mesh_preserves_torch_falloff_steps() {
+        let reg = load_oracle_registry();
+        let stone_id = state_id_of(&reg, "stone");
+        let air_id = state_id_of(&reg, "air");
+
+        let mut halo = SectionHalo::new();
+        // Floor of stone at y = 0
+        for z in 0..16 {
+            for x in 0..16 {
+                halo.set_voxel(x, 0, z, stone_id);
+            }
+        }
+        // Rest is air
+        for y in 1..=16 {
+            for z in -1..=16 {
+                for x in -1..=16 {
+                    halo.set_voxel(x, y, z, air_id);
+                }
+            }
+        }
+        for z in -1..=16 {
+            for x in -1..=16 {
+                halo.set_voxel(x, -1, z, stone_id);
+            }
+        }
+
+        // Apply light step at y = 1: x in -1..8 gets block 14, x in 8..=16 gets block 10
+        for z in -1..=16 {
+            for x in -1..8 {
+                halo.set_packed_light(x, 1, z, 0x0E);
+            }
+            for x in 8..=16 {
+                halo.set_packed_light(x, 1, z, 0x0A);
+            }
+        }
+
+        let mesh = mesh_section(&halo, &reg);
+        // Find UP faces (normal_id == 0)
+        let up_vertices: Vec<_> = mesh.vertices.iter().filter(|v| v.normal_id() == 0).collect();
+        // UP faces must NOT merge into a single quad because the light step at x=8 splits them
+        assert!(up_vertices.len() > 6, "UP faces must not merge across light step boundary");
+    }
+
+    #[test]
+    fn test_quad_diagonal_flip_on_asymmetric_ao() {
+        let key_asymmetric = FaceMergeKey {
+            base_layer: 100,
+            tint_mode: 0,
+            uv_rot: 0,
+            corner_ao: [1, 3, 3, 3], // corner 0 in shadow
+            corner_sky: [15, 15, 15, 15],
+            corner_block: [0, 0, 0, 0],
+        };
+
+        let mut verts_flipped = Vec::new();
+        let v0 = (0, 1, 0);
+        let v1 = (0, 1, 1);
+        let v2 = (1, 1, 1);
+        let v3 = (1, 1, 0);
+
+        // When corner 0 has ao = 1, d02 = 1 + 3 = 4, d13 = 3 + 3 = 6.
+        // d02 < d13 => flip is true! Triangles: (V1, V2, V3) and (V1, V3, V0).
+        // First emitted vertex must be V1.
+        emit_quad(&mut verts_flipped, v0, v1, v2, v3, 0, &key_asymmetric);
+        assert_eq!(verts_flipped.len(), 6);
+        assert_eq!(verts_flipped[0].x(), v1.0);
+        assert_eq!(verts_flipped[0].y(), v1.1);
+        assert_eq!(verts_flipped[0].z(), v1.2);
+
+        // Symmetric case: all ao = 3. d02 == d13, l02 == l13 => flip is false!
+        // Triangles: (V0, V1, V2) and (V0, V2, V3).
+        // First emitted vertex must be V0.
+        let key_symmetric = FaceMergeKey {
+            corner_ao: [3, 3, 3, 3],
+            ..key_asymmetric
+        };
+        let mut verts_normal = Vec::new();
+        emit_quad(&mut verts_normal, v0, v1, v2, v3, 0, &key_symmetric);
+        assert_eq!(verts_normal.len(), 6);
+        assert_eq!(verts_normal[0].x(), v0.0);
+        assert_eq!(verts_normal[0].y(), v0.1);
+        assert_eq!(verts_normal[0].z(), v0.2);
     }
 }

@@ -423,6 +423,7 @@ fn main() {
     let mut records: BTreeMap<String, OutRec> = BTreeMap::new();
     let mut no_occlusion: BTreeSet<String> = BTreeSet::new();
     let mut skylight: BTreeSet<String> = BTreeSet::new();
+    let mut cull_classes: BTreeMap<String, String> = BTreeMap::new();
     let mut diagnostics: Vec<String> = vec![];
 
     for (decl_line, raw) in reg_bodies(&src) {
@@ -457,6 +458,40 @@ fn main() {
             skylight.extend(ids.iter().cloned());
         }
 
+        let is_leaves = body.contains("LeavesBlock")
+            || body.contains("ParticleLeavesBlock")
+            || body.contains("leavesProperties(")
+            || base.ends_with("_leaves")
+            || base == "leaves";
+        let is_water = base == "water" || base == "flowing_water";
+        let is_lava = base == "lava" || base == "flowing_lava";
+        let is_half_transparent = body.contains("TransparentBlock")
+            || body.contains("HalfTransparentBlock")
+            || body.contains("IceBlock")
+            || body.contains("FrostedIceBlock")
+            || body.contains("StainedGlassBlock")
+            || body.contains("TintedGlassBlock")
+            || body.contains("SlimeBlock")
+            || body.contains("HoneyBlock");
+
+        if is_leaves {
+            for id in &ids {
+                cull_classes.insert(id.clone(), "leaves".to_string());
+            }
+        } else if is_water {
+            for id in &ids {
+                cull_classes.insert(id.clone(), "water".to_string());
+            }
+        } else if is_lava {
+            for id in &ids {
+                cull_classes.insert(id.clone(), "lava".to_string());
+            }
+        } else if is_half_transparent {
+            for id in &ids {
+                cull_classes.insert(id.clone(), id.clone());
+            }
+        }
+
         // provenance patching happens after legacy resolution below
         let _ = decl_line;
     }
@@ -477,6 +512,11 @@ fn main() {
                     if !seen.insert(cur.clone()) {
                         diagnostics.push(format!("{origin}: legacy-copy cycle at {cur}"));
                         break;
+                    }
+                    if !cull_classes.contains_key(&origin) {
+                        if let Some(cc) = cull_classes.get(&cur).cloned() {
+                            cull_classes.insert(origin.clone(), cc);
+                        }
                     }
                     match records.get(&cur) {
                         Some(OutRec::Resolved(r)) => {
@@ -514,6 +554,7 @@ fn main() {
 
     let no_occlusion_n = no_occlusion.len();
     let skylight_n = skylight.len();
+    let cull_classes_n = cull_classes.len();
     let json = json!({
         "version": 1,
         "generated_by": "property_extractor (the only non-hermetic pipeline step; baker reads this JSON)",
@@ -524,6 +565,7 @@ fn main() {
         "emission": emit_map,
         "no_occlusion": no_occlusion.into_iter().collect::<Vec<_>>(),
         "skylight": skylight.into_iter().collect::<Vec<_>>(),
+        "cull_classes": cull_classes,
     });
 
     if let Some(parent) = Path::new(&out_path).parent() {
@@ -533,10 +575,11 @@ fn main() {
         .expect("write block_properties.json");
 
     println!(
-        "block_properties.json: {} emission entries, {} noOcclusion, {} skylight; {} problems",
+        "block_properties.json: {} emission entries, {} noOcclusion, {} skylight, {} cull_classes; {} problems",
         emit_map.len(),
         no_occlusion_n,
         skylight_n,
+        cull_classes_n,
         diagnostics.len()
     );
     for w in &diagnostics {

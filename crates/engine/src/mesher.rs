@@ -7,6 +7,11 @@
 use crate::light::{
     ChunkLightColumn, ChunkVoxelColumn, MAX_Y, MIN_Y, SECTION_COUNT, SECTION_SIZE,
 };
+use crate::registry::{
+    BlockRegistry, BlockStateEntry, CULL_LEAVES, CULL_OPAQUE, FACE_DOWN, FACE_EAST, FACE_NORTH,
+    FACE_SOUTH, FACE_UP, FACE_WEST, MESH_CUBE, MESH_EMPTY,
+};
+use crate::PackedVoxelVertex;
 
 pub const HALO_SIZE: usize = 18;
 pub const HALO_VOXELS: usize = HALO_SIZE * HALO_SIZE * HALO_SIZE; // 5,832
@@ -239,3 +244,578 @@ impl<'a> OptionalHorizontalNeighbors<'a> {
         })
     }
 }
+
+/// Key identifying mergeable face attributes for 2D greedy meshing (SPECS §5).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FaceMergeKey {
+    pub base_layer: u16,
+    pub tint_mode: u8,
+    pub uv_rot: u8,
+    pub corner_ao: [u8; 4],
+    pub corner_sky: [u8; 4],
+    pub corner_block: [u8; 4],
+}
+
+/// Result of meshing a single 16³ chunk section.
+#[derive(Clone, Debug, Default)]
+pub struct MeshResult {
+    pub vertices: Vec<PackedVoxelVertex>,
+}
+
+impl MeshResult {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline(always)]
+    pub fn quad_count(&self) -> usize {
+        self.vertices.len() / 6
+    }
+
+    #[inline(always)]
+    pub fn vertex_count(&self) -> usize {
+        self.vertices.len()
+    }
+}
+
+/// Evaluates face culling between current block and neighbor along normal (SPECS §2).
+///
+/// Rules:
+/// 1. Opaque neighbor (`neighbor.is_opaque == 1`) always culls.
+/// 2. Empty neighbor (`neighbor.mesh_type == MESH_EMPTY`) never culls.
+/// 3. If current block is opaque, it renders against non-opaque neighbors.
+/// 4. Leaves family: never cull against any LeavesBlock (render internal canopy).
+/// 5. Same non-opaque block (water|water, lava|lava, glass|glass, ice|ice): cull internal faces.
+/// 6. Different non-opaque blocks (water vs lava, glass vs ice): render both faces.
+#[inline(always)]
+pub fn should_cull_face(curr: &BlockStateEntry, neighbor: &BlockStateEntry) -> bool {
+    if neighbor.is_opaque != 0 {
+        return true;
+    }
+
+    if neighbor.mesh_type == MESH_EMPTY {
+        return false;
+    }
+
+    if curr.is_opaque != 0 {
+        return false;
+    }
+
+    let curr_cc = curr.cull_class();
+    let neighbor_cc = neighbor.cull_class();
+
+    if curr_cc == CULL_LEAVES && neighbor_cc == CULL_LEAVES {
+        return false;
+    }
+
+    if curr_cc != CULL_OPAQUE && curr_cc == neighbor_cc {
+        return true;
+    }
+
+    false
+}
+
+/// Computes (ao, sky, block) for a vertex corner using the sealed-corner lighting rule (SPECS §4).
+#[inline(always)]
+pub fn compute_corner(
+    halo: &SectionHalo,
+    reg: &BlockRegistry,
+    center: (i32, i32, i32),
+    side1: (i32, i32, i32),
+    side2: (i32, i32, i32),
+    corner: (i32, i32, i32),
+) -> (u8, u8, u8) {
+    let s1_state = reg.get_state(halo.get_voxel(side1.0, side1.1, side1.2) as u32)
+        .unwrap_or_else(|| reg.get_state_unchecked(0));
+    let s2_state = reg.get_state(halo.get_voxel(side2.0, side2.1, side2.2) as u32)
+        .unwrap_or_else(|| reg.get_state_unchecked(0));
+    let c_state = reg.get_state(halo.get_voxel(corner.0, corner.1, corner.2) as u32)
+        .unwrap_or_else(|| reg.get_state_unchecked(0));
+
+    let s1_opaque = s1_state.is_opaque != 0;
+    let s2_opaque = s2_state.is_opaque != 0;
+    let c_opaque = c_state.is_opaque != 0;
+
+    let ao = if s1_opaque && s2_opaque {
+        0
+    } else {
+        3 - (s1_opaque as u8 + s2_opaque as u8 + c_opaque as u8)
+    };
+
+    let center_light = halo.get_packed_light(center.0, center.1, center.2);
+    let side1_light = halo.get_packed_light(side1.0, side1.1, side1.2);
+    let side2_light = halo.get_packed_light(side2.0, side2.1, side2.2);
+
+    let corner_light = if s1_opaque && s2_opaque {
+        // Sealed corner: substitute by first side (side1)
+        side1_light
+    } else {
+        halo.get_packed_light(corner.0, corner.1, corner.2)
+    };
+
+    let center_sky = (center_light >> 4) & 0x0F;
+    let center_block = center_light & 0x0F;
+
+    let (s1_sky, s1_blk, s2_sky, s2_blk, c_sky, c_blk) = if center_sky > 2 || center_block > 2 {
+        let fix_sample = |sample: u8| -> (u8, u8) {
+            if sample == 0 {
+                (center_sky, center_block)
+            } else {
+                let sky = (sample >> 4) & 0x0F;
+                let block = sample & 0x0F;
+                let final_sky = if sky == 0 { center_sky } else { sky };
+                (final_sky, block)
+            }
+        };
+        let (s1_s, s1_b) = fix_sample(side1_light);
+        let (s2_s, s2_b) = fix_sample(side2_light);
+        let (c_s, c_b) = fix_sample(corner_light);
+        (s1_s, s1_b, s2_s, s2_b, c_s, c_b)
+    } else {
+        (
+            (side1_light >> 4) & 0x0F,
+            side1_light & 0x0F,
+            (side2_light >> 4) & 0x0F,
+            side2_light & 0x0F,
+            (corner_light >> 4) & 0x0F,
+            corner_light & 0x0F,
+        )
+    };
+
+    let sum_sky = (center_sky as u16) + (s1_sky as u16) + (s2_sky as u16) + (c_sky as u16);
+    let sum_block = (center_block as u16) + (s1_blk as u16) + (s2_blk as u16) + (c_blk as u16);
+
+    let sky = (sum_sky >> 2) as u8;
+    let block = (sum_block >> 2) as u8;
+
+    (ao, sky, block)
+}
+
+#[inline(always)]
+pub fn emit_quad(
+    out: &mut Vec<PackedVoxelVertex>,
+    v0: (u32, u32, u32),
+    v1: (u32, u32, u32),
+    v2: (u32, u32, u32),
+    v3: (u32, u32, u32),
+    normal_id: u32,
+    key: &FaceMergeKey,
+) {
+    let brightness = |idx: usize| -> u32 {
+        let ao = key.corner_ao[idx] as u32;
+        let sky = key.corner_sky[idx] as u32;
+        let blk = key.corner_block[idx] as u32;
+        (ao << 5) + sky.max(blk)
+    };
+
+    let b0 = brightness(0);
+    let b1 = brightness(1);
+    let b2 = brightness(2);
+    let b3 = brightness(3);
+
+    let d02 = b0 + b2;
+    let d13 = b1 + b3;
+
+    let flip = if d02 > d13 {
+        false
+    } else if d02 < d13 {
+        true
+    } else {
+        let l02 = (key.corner_sky[0].max(key.corner_block[0]) as u32)
+            + (key.corner_sky[2].max(key.corner_block[2]) as u32);
+        let l13 = (key.corner_sky[1].max(key.corner_block[1]) as u32)
+            + (key.corner_sky[3].max(key.corner_block[3]) as u32);
+        l02 > l13
+    };
+
+    let make_vert = |pos: (u32, u32, u32), corner_idx: usize| -> PackedVoxelVertex {
+        let mut vert = PackedVoxelVertex::new(
+            pos.0,
+            pos.1,
+            pos.2,
+            normal_id,
+            0,
+            key.uv_rot as u32,
+            key.corner_block[corner_idx] as u32,
+            key.corner_sky[corner_idx] as u32,
+            key.corner_ao[corner_idx] as u32,
+            key.base_layer as u32,
+        );
+        vert.set_registry_tint_mode(key.tint_mode);
+        vert
+    };
+
+    if !flip {
+        // Tri 1: V0, V1, V2
+        // Tri 2: V0, V2, V3
+        out.push(make_vert(v0, 0));
+        out.push(make_vert(v1, 1));
+        out.push(make_vert(v2, 2));
+
+        out.push(make_vert(v0, 0));
+        out.push(make_vert(v2, 2));
+        out.push(make_vert(v3, 3));
+    } else {
+        // Tri 1: V1, V2, V3
+        // Tri 2: V1, V3, V0
+        out.push(make_vert(v1, 1));
+        out.push(make_vert(v2, 2));
+        out.push(make_vert(v3, 3));
+
+        out.push(make_vert(v1, 1));
+        out.push(make_vert(v3, 3));
+        out.push(make_vert(v0, 0));
+    }
+}
+
+#[inline(always)]
+fn greedy_sweep<F>(
+    mask: &[Option<FaceMergeKey>; 256],
+    out: &mut Vec<PackedVoxelVertex>,
+    mut emit: F,
+) where
+    F: FnMut(&mut Vec<PackedVoxelVertex>, usize, usize, usize, usize, &FaceMergeKey),
+{
+    let mut visited = [false; 256];
+    for v in 0..16 {
+        for u in 0..16 {
+            let idx = v * 16 + u;
+            if visited[idx] {
+                continue;
+            }
+            let Some(key) = mask[idx] else {
+                continue;
+            };
+
+            // 1. Expand along U (width)
+            let mut w = 1;
+            while u + w < 16 {
+                let next_idx = v * 16 + (u + w);
+                if !visited[next_idx] && mask[next_idx] == Some(key) {
+                    w += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // 2. Expand along V (height)
+            let mut h = 1;
+            'expand_v: while v + h < 16 {
+                for du in 0..w {
+                    let next_idx = (v + h) * 16 + (u + du);
+                    if visited[next_idx] || mask[next_idx] != Some(key) {
+                        break 'expand_v;
+                    }
+                }
+                h += 1;
+            }
+
+            // 3. Mark merged cells visited
+            for dv in 0..h {
+                for du in 0..w {
+                    visited[(v + dv) * 16 + (u + du)] = true;
+                }
+            }
+
+            // 4. Emit the quad for [u, u+w], [v, v+h]
+            emit(out, u, u + w, v, v + h, &key);
+        }
+    }
+}
+
+/// Meshes a 16³ chunk section using its extracted 18³ halo buffer.
+pub fn mesh_section(halo: &SectionHalo, reg: &BlockRegistry) -> MeshResult {
+    let mut result = MeshResult::default();
+    mesh_section_into(halo, reg, &mut result);
+    result
+}
+
+/// Meshes a 16³ chunk section into an existing reusable `MeshResult`.
+pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut MeshResult) {
+    out.vertices.clear();
+
+    // 0: FACE_UP (+Y)
+    for y in 0..16 {
+        let mut mask = [None; 256];
+        for z in 0..16 {
+            for x in 0..16 {
+                let v_id = halo.get_voxel(x, y, z);
+                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if state.mesh_type != MESH_CUBE {
+                    continue;
+                }
+                let face = state.faces[FACE_UP];
+                if face.base_layer >= 2048 {
+                    continue;
+                }
+                let n_id = halo.get_voxel(x, y + 1, z);
+                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if should_cull_face(state, n_state) {
+                    continue;
+                }
+
+                let center = (x, y + 1, z);
+                let c0 = compute_corner(halo, reg, center, (x - 1, y + 1, z), (x, y + 1, z - 1), (x - 1, y + 1, z - 1));
+                let c1 = compute_corner(halo, reg, center, (x - 1, y + 1, z), (x, y + 1, z + 1), (x - 1, y + 1, z + 1));
+                let c2 = compute_corner(halo, reg, center, (x + 1, y + 1, z), (x, y + 1, z + 1), (x + 1, y + 1, z + 1));
+                let c3 = compute_corner(halo, reg, center, (x + 1, y + 1, z), (x, y + 1, z - 1), (x + 1, y + 1, z - 1));
+
+                mask[(z as usize) * 16 + (x as usize)] = Some(FaceMergeKey {
+                    base_layer: face.base_layer,
+                    tint_mode: face.tint_mode,
+                    uv_rot: face.uv_rot,
+                    corner_ao: [c0.0, c1.0, c2.0, c3.0],
+                    corner_sky: [c0.1, c1.1, c2.1, c3.1],
+                    corner_block: [c0.2, c1.2, c2.2, c3.2],
+                });
+            }
+        }
+        greedy_sweep(&mask, &mut out.vertices, |out, u0, u1, v0, v1, key| {
+            let v0_p = (u0 as u32, (y + 1) as u32, v0 as u32);
+            let v1_p = (u0 as u32, (y + 1) as u32, v1 as u32);
+            let v2_p = (u1 as u32, (y + 1) as u32, v1 as u32);
+            let v3_p = (u1 as u32, (y + 1) as u32, v0 as u32);
+            emit_quad(out, v0_p, v1_p, v2_p, v3_p, 0, key);
+        });
+    }
+
+    // 1: FACE_DOWN (-Y)
+    for y in 0..16 {
+        let mut mask = [None; 256];
+        for z in 0..16 {
+            for x in 0..16 {
+                let v_id = halo.get_voxel(x, y, z);
+                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if state.mesh_type != MESH_CUBE {
+                    continue;
+                }
+                let face = state.faces[FACE_DOWN];
+                if face.base_layer >= 2048 {
+                    continue;
+                }
+                let n_id = halo.get_voxel(x, y - 1, z);
+                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if should_cull_face(state, n_state) {
+                    continue;
+                }
+
+                let center = (x, y - 1, z);
+                let c0 = compute_corner(halo, reg, center, (x - 1, y - 1, z), (x, y - 1, z + 1), (x - 1, y - 1, z + 1));
+                let c1 = compute_corner(halo, reg, center, (x - 1, y - 1, z), (x, y - 1, z - 1), (x - 1, y - 1, z - 1));
+                let c2 = compute_corner(halo, reg, center, (x + 1, y - 1, z), (x, y - 1, z - 1), (x + 1, y - 1, z - 1));
+                let c3 = compute_corner(halo, reg, center, (x + 1, y - 1, z), (x, y - 1, z + 1), (x + 1, y - 1, z + 1));
+
+                mask[(z as usize) * 16 + (x as usize)] = Some(FaceMergeKey {
+                    base_layer: face.base_layer,
+                    tint_mode: face.tint_mode,
+                    uv_rot: face.uv_rot,
+                    corner_ao: [c0.0, c1.0, c2.0, c3.0],
+                    corner_sky: [c0.1, c1.1, c2.1, c3.1],
+                    corner_block: [c0.2, c1.2, c2.2, c3.2],
+                });
+            }
+        }
+        greedy_sweep(&mask, &mut out.vertices, |out, u0, u1, v0, v1, key| {
+            let v0_p = (u0 as u32, y as u32, v1 as u32);
+            let v1_p = (u0 as u32, y as u32, v0 as u32);
+            let v2_p = (u1 as u32, y as u32, v0 as u32);
+            let v3_p = (u1 as u32, y as u32, v1 as u32);
+            emit_quad(out, v0_p, v1_p, v2_p, v3_p, 1, key);
+        });
+    }
+
+    // 2: FACE_SOUTH (+Z)
+    for z in 0..16 {
+        let mut mask = [None; 256];
+        for y in 0..16 {
+            for x in 0..16 {
+                let v_id = halo.get_voxel(x, y, z);
+                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if state.mesh_type != MESH_CUBE {
+                    continue;
+                }
+                let face = state.faces[FACE_SOUTH];
+                if face.base_layer >= 2048 {
+                    continue;
+                }
+                let n_id = halo.get_voxel(x, y, z + 1);
+                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if should_cull_face(state, n_state) {
+                    continue;
+                }
+
+                let center = (x, y, z + 1);
+                let c0 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x, y + 1, z + 1), (x - 1, y + 1, z + 1));
+                let c1 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x, y - 1, z + 1), (x - 1, y - 1, z + 1));
+                let c2 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x, y - 1, z + 1), (x + 1, y - 1, z + 1));
+                let c3 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x, y + 1, z + 1), (x + 1, y + 1, z + 1));
+
+                mask[(y as usize) * 16 + (x as usize)] = Some(FaceMergeKey {
+                    base_layer: face.base_layer,
+                    tint_mode: face.tint_mode,
+                    uv_rot: face.uv_rot,
+                    corner_ao: [c0.0, c1.0, c2.0, c3.0],
+                    corner_sky: [c0.1, c1.1, c2.1, c3.1],
+                    corner_block: [c0.2, c1.2, c2.2, c3.2],
+                });
+            }
+        }
+        greedy_sweep(&mask, &mut out.vertices, |out, u0, u1, v0, v1, key| {
+            let v0_p = (u0 as u32, v1 as u32, (z + 1) as u32);
+            let v1_p = (u0 as u32, v0 as u32, (z + 1) as u32);
+            let v2_p = (u1 as u32, v0 as u32, (z + 1) as u32);
+            let v3_p = (u1 as u32, v1 as u32, (z + 1) as u32);
+            emit_quad(out, v0_p, v1_p, v2_p, v3_p, 2, key);
+        });
+    }
+
+    // 3: FACE_NORTH (-Z)
+    for z in 0..16 {
+        let mut mask = [None; 256];
+        for y in 0..16 {
+            for x in 0..16 {
+                let v_id = halo.get_voxel(x, y, z);
+                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if state.mesh_type != MESH_CUBE {
+                    continue;
+                }
+                let face = state.faces[FACE_NORTH];
+                if face.base_layer >= 2048 {
+                    continue;
+                }
+                let n_id = halo.get_voxel(x, y, z - 1);
+                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if should_cull_face(state, n_state) {
+                    continue;
+                }
+
+                let center = (x, y, z - 1);
+                let c0 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x, y + 1, z - 1), (x + 1, y + 1, z - 1));
+                let c1 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x, y - 1, z - 1), (x + 1, y - 1, z - 1));
+                let c2 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x, y - 1, z - 1), (x - 1, y - 1, z - 1));
+                let c3 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x, y + 1, z - 1), (x - 1, y + 1, z - 1));
+
+                mask[(y as usize) * 16 + (x as usize)] = Some(FaceMergeKey {
+                    base_layer: face.base_layer,
+                    tint_mode: face.tint_mode,
+                    uv_rot: face.uv_rot,
+                    corner_ao: [c0.0, c1.0, c2.0, c3.0],
+                    corner_sky: [c0.1, c1.1, c2.1, c3.1],
+                    corner_block: [c0.2, c1.2, c2.2, c3.2],
+                });
+            }
+        }
+        greedy_sweep(&mask, &mut out.vertices, |out, u0, u1, v0, v1, key| {
+            let v0_p = (u1 as u32, v1 as u32, z as u32);
+            let v1_p = (u1 as u32, v0 as u32, z as u32);
+            let v2_p = (u0 as u32, v0 as u32, z as u32);
+            let v3_p = (u0 as u32, v1 as u32, z as u32);
+            emit_quad(out, v0_p, v1_p, v2_p, v3_p, 3, key);
+        });
+    }
+
+    // 4: FACE_EAST (+X)
+    for x in 0..16 {
+        let mut mask = [None; 256];
+        for y in 0..16 {
+            for z in 0..16 {
+                let v_id = halo.get_voxel(x, y, z);
+                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if state.mesh_type != MESH_CUBE {
+                    continue;
+                }
+                let face = state.faces[FACE_EAST];
+                if face.base_layer >= 2048 {
+                    continue;
+                }
+                let n_id = halo.get_voxel(x + 1, y, z);
+                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if should_cull_face(state, n_state) {
+                    continue;
+                }
+
+                let center = (x + 1, y, z);
+                let c0 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x + 1, y + 1, z), (x + 1, y + 1, z + 1));
+                let c1 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x + 1, y - 1, z), (x + 1, y - 1, z + 1));
+                let c2 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x + 1, y - 1, z), (x + 1, y - 1, z - 1));
+                let c3 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x + 1, y + 1, z), (x + 1, y + 1, z - 1));
+
+                mask[(y as usize) * 16 + (z as usize)] = Some(FaceMergeKey {
+                    base_layer: face.base_layer,
+                    tint_mode: face.tint_mode,
+                    uv_rot: face.uv_rot,
+                    corner_ao: [c0.0, c1.0, c2.0, c3.0],
+                    corner_sky: [c0.1, c1.1, c2.1, c3.1],
+                    corner_block: [c0.2, c1.2, c2.2, c3.2],
+                });
+            }
+        }
+        greedy_sweep(&mask, &mut out.vertices, |out, u0, u1, v0, v1, key| {
+            let v0_p = ((x + 1) as u32, v1 as u32, u1 as u32);
+            let v1_p = ((x + 1) as u32, v0 as u32, u1 as u32);
+            let v2_p = ((x + 1) as u32, v0 as u32, u0 as u32);
+            let v3_p = ((x + 1) as u32, v1 as u32, u0 as u32);
+            emit_quad(out, v0_p, v1_p, v2_p, v3_p, 4, key);
+        });
+    }
+
+    // 5: FACE_WEST (-X)
+    for x in 0..16 {
+        let mut mask = [None; 256];
+        for y in 0..16 {
+            for z in 0..16 {
+                let v_id = halo.get_voxel(x, y, z);
+                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if state.mesh_type != MESH_CUBE {
+                    continue;
+                }
+                let face = state.faces[FACE_WEST];
+                if face.base_layer >= 2048 {
+                    continue;
+                }
+                let n_id = halo.get_voxel(x - 1, y, z);
+                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                if should_cull_face(state, n_state) {
+                    continue;
+                }
+
+                let center = (x - 1, y, z);
+                let c0 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x - 1, y + 1, z), (x - 1, y + 1, z - 1));
+                let c1 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x - 1, y - 1, z), (x - 1, y - 1, z - 1));
+                let c2 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x - 1, y - 1, z), (x - 1, y - 1, z + 1));
+                let c3 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x - 1, y + 1, z), (x - 1, y + 1, z + 1));
+
+                mask[(y as usize) * 16 + (z as usize)] = Some(FaceMergeKey {
+                    base_layer: face.base_layer,
+                    tint_mode: face.tint_mode,
+                    uv_rot: face.uv_rot,
+                    corner_ao: [c0.0, c1.0, c2.0, c3.0],
+                    corner_sky: [c0.1, c1.1, c2.1, c3.1],
+                    corner_block: [c0.2, c1.2, c2.2, c3.2],
+                });
+            }
+        }
+        greedy_sweep(&mask, &mut out.vertices, |out, u0, u1, v0, v1, key| {
+            let v0_p = (x as u32, v1 as u32, u0 as u32);
+            let v1_p = (x as u32, v0 as u32, u0 as u32);
+            let v2_p = (x as u32, v0 as u32, u1 as u32);
+            let v3_p = (x as u32, v1 as u32, u1 as u32);
+            emit_quad(out, v0_p, v1_p, v2_p, v3_p, 5, key);
+        });
+    }
+}
+
+/// Convenience helper to populate halo and mesh section in one call.
+pub fn mesh_section_with_neighbors(
+    section_idx: usize,
+    center_voxels: &ChunkVoxelColumn,
+    center_light: &ChunkLightColumn,
+    neighbors: &HorizontalNeighbors,
+    reg: &BlockRegistry,
+    air_state_id: u16,
+) -> MeshResult {
+    let mut halo = SectionHalo::new();
+    halo.populate(section_idx, center_voxels, center_light, neighbors, air_state_id);
+    mesh_section(&halo, reg)
+}
+

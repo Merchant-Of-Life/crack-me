@@ -31,6 +31,12 @@ pub struct FaceInfo {
     pub uv_rot: u8,      // 0..3 (90° steps)
 }
 
+pub const CULL_OPAQUE: u8 = 0;
+pub const CULL_LEAVES: u8 = 1;
+pub const CULL_WATER: u8 = 2;
+pub const CULL_LAVA: u8 = 3;
+pub const CULL_TRANSPARENT_START: u8 = 4;
+
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct BlockStateEntry {
     pub faces: [FaceInfo; 6],
@@ -39,7 +45,14 @@ pub struct BlockStateEntry {
     pub is_solid: u8,
     pub light_emission: u8, // 0..15 block light emitted
     pub light_filter: u8,   // 0..15 light attenuation per voxel
-    pub pad: [u8; 3],
+    pub pad: [u8; 3],       // pad[0] = cull_class
+}
+
+impl BlockStateEntry {
+    #[inline(always)]
+    pub fn cull_class(&self) -> u8 {
+        self.pad[0]
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
