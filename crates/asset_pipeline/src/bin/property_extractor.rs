@@ -170,6 +170,135 @@ fn parse_copper_block_special_names(decomp_dir: &Path) -> Vec<String> {
     std::process::exit(1);
 }
 
+/// Detects blocks that are currently classified as `solid` in `render_layers` but whose
+/// model textures contain transparent/cutout pixels (alpha < 255).
+/// In vanilla 26.3, these blocks are CUTOUT via `byTransparency` on their quad sprites,
+/// but their Properties were constructed via helper methods (like `torchProperties()`)
+/// or custom Block classes without an inline `.noOcclusion()` call.
+/// Flagging them in the coverage report ensures transparency for complex-mesh re-derivation.
+fn detect_helper_undershoots(
+    registry_blocks: &BTreeSet<String>,
+    render_layers: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Ok(manifest_str) = fs::read_to_string("assets/textures/texture_manifest.json") else {
+        return Vec::new();
+    };
+    let Ok(manifest_val): Result<J, _> = serde_json::from_str(&manifest_str) else {
+        return Vec::new();
+    };
+    let Some(textures) = manifest_val.get("textures").and_then(|t| t.as_object()) else {
+        return Vec::new();
+    };
+    let Ok(mip0_bytes) = fs::read("assets/textures/block_layers_mip0_16x16.rgba8") else {
+        return Vec::new();
+    };
+
+    let mut layer_has_alpha: BTreeMap<String, bool> = BTreeMap::new();
+    for (name, entry) in textures {
+        let Some(base_layer) = entry.get("base_layer").and_then(|l| l.as_u64()) else { continue };
+        let offset = (base_layer as usize) * 1024;
+        let mut has_alpha = false;
+        if offset + 1024 <= mip0_bytes.len() {
+            for pixel in mip0_bytes[offset..offset + 1024].chunks_exact(4) {
+                if pixel[3] < 255 {
+                    has_alpha = true;
+                    break;
+                }
+            }
+        }
+        layer_has_alpha.insert(name.clone(), has_alpha);
+    }
+
+    let mut undershoots = Vec::new();
+    for block in registry_blocks {
+        let is_solid = render_layers.get(block).map(|s| s.as_str()).unwrap_or("solid") == "solid";
+        if !is_solid {
+            continue;
+        }
+
+        let bs_path = format!("assets/blockstates/{}.json", block);
+        let Ok(bs_str) = fs::read_to_string(&bs_path) else { continue };
+        let Ok(bs_val): Result<J, _> = serde_json::from_str(&bs_str) else { continue };
+
+        let mut model_names = BTreeSet::new();
+        if let Some(variants) = bs_val.get("variants").and_then(|v| v.as_object()) {
+            for v in variants.values() {
+                if let Some(arr) = v.as_array() {
+                    for item in arr {
+                        if let Some(m) = item.get("model").and_then(|s| s.as_str()) {
+                            model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                        }
+                    }
+                } else if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
+                    model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                }
+            }
+        }
+        if let Some(multipart) = bs_val.get("multipart").and_then(|m| m.as_array()) {
+            for part in multipart {
+                if let Some(apply) = part.get("apply") {
+                    if let Some(arr) = apply.as_array() {
+                        for item in arr {
+                            if let Some(m) = item.get("model").and_then(|s| s.as_str()) {
+                                model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                            }
+                        }
+                    } else if let Some(m) = apply.get("model").and_then(|s| s.as_str()) {
+                        model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                    }
+                }
+            }
+        }
+
+        let mut has_cutout_tex = false;
+        for m_name in model_names {
+            let mut cur_model = m_name;
+            for _ in 0..8 {
+                let m_path = format!("assets/models/block/{}.json", cur_model);
+                let Ok(m_str) = fs::read_to_string(&m_path) else { break; };
+                let Ok(m_val): Result<J, _> = serde_json::from_str(&m_str) else { break; };
+                if let Some(tex_obj) = m_val.get("textures").and_then(|t| t.as_object()) {
+                    for t_val in tex_obj.values() {
+                        let t_str_opt = if let Some(s) = t_val.as_str() {
+                            Some(s.to_string())
+                        } else if let Some(s) = t_val.get("sprite").and_then(|s| s.as_str()) {
+                            Some(s.to_string())
+                        } else {
+                            None
+                        };
+                        if let Some(t_str) = t_str_opt {
+                            if !t_str.starts_with('#') {
+                                let clean_t = t_str.replace("minecraft:block/", "").replace("block/", "");
+                                if layer_has_alpha.get(&clean_t).copied().unwrap_or(false) {
+                                    has_cutout_tex = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if has_cutout_tex {
+                    break;
+                }
+                if let Some(parent) = m_val.get("parent").and_then(|p| p.as_str()) {
+                    cur_model = parent.replace("minecraft:block/", "").replace("block/", "");
+                } else {
+                    break;
+                }
+            }
+            if has_cutout_tex {
+                break;
+            }
+        }
+
+        if has_cutout_tex {
+            undershoots.push(block.clone());
+        }
+    }
+
+    undershoots
+}
+
 /// Block name from the registration FIELD (left side of `=`). Field names track the
 /// canonical block ids far more reliably than the id constants (e.g. CAVE_VINES
 /// registers under `BlockItemIds.GLOW_BERRY_CROP`).
@@ -750,6 +879,11 @@ fn main() {
         count_cutout,
         count_translucent
     );
+    let flagged_helper_undershoots = detect_helper_undershoots(&registry_blocks, &render_layers);
+    println!(
+        "Helper-class undershoots flagged (solid in registry but model has cutout/alpha textures): {} blocks",
+        flagged_helper_undershoots.len()
+    );
     println!("=================================================================");
 
     let json = json!({
@@ -775,6 +909,8 @@ fn main() {
                 "cutout_mipped": count_cutout_mipped,
                 "cutout": count_cutout,
                 "translucent": count_translucent,
+                "flagged_helper_undershoots_count": flagged_helper_undershoots.len(),
+                "flagged_helper_undershoots": flagged_helper_undershoots,
             },
         },
     });
