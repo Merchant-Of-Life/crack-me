@@ -39,6 +39,7 @@ pub struct TextureEntry {
     pub original_height: u32,
     pub animated: bool,
     pub frame_count: u32,
+    pub frametime: u32,
     pub interpolate: bool,
     pub timeline_offset: u32,
     pub timeline_len: u32,
@@ -345,6 +346,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if animated {
             // Process all individual animation frames
             let (timeline, interpolate) = build_timeline(parsed_mcmeta.as_ref(), frame_count);
+            let frametime = parsed_mcmeta.as_ref().and_then(|a| a.frametime).unwrap_or(1).max(1);
             let timeline_offset = global_timeline.len() as u32;
             let timeline_len = timeline.len() as u32;
             global_timeline.extend(&timeline);
@@ -381,6 +383,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     original_height: h,
                     animated: true,
                     frame_count,
+                    frametime,
                     interpolate,
                     timeline_offset,
                     timeline_len,
@@ -417,6 +420,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     original_height: h,
                     animated: false,
                     frame_count: 1,
+                    frametime: 0,
                     interpolate: false,
                     timeline_offset: 0,
                     timeline_len: 0,
@@ -451,6 +455,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     original_height: 16,
                     animated: false,
                     frame_count: 1,
+                    frametime: 0,
                     interpolate: false,
                     timeline_offset: 0,
                     timeline_len: 0,
@@ -497,6 +502,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 original_height: 16,
                 animated: false,
                 frame_count: 1,
+                frametime: 0,
                 interpolate: false,
                 timeline_offset: 0,
                 timeline_len: 0,
@@ -552,6 +558,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         timeline_bytes.extend_from_slice(&val.to_le_bytes());
     }
     fs::write("assets/textures/animation_timeline.bin", &timeline_bytes)?;
+
+    // Write binary animation meta table: 1844 rows x [u32 offset, u32 len, u32 frametime] = 22,128 bytes
+    // SPECS 9742f26 pins per-layer ownership: distribute [offset, len, ft_code] across base..base+frame_count
+    let mut animation_meta = vec![[0u32; 3]; total_layers as usize];
+    for (_name, entry) in &manifest_entries {
+        let base = entry.base_layer as usize;
+        if entry.animated {
+            let ft_field = if entry.interpolate { 0 } else { 1 };
+            for f in 0..entry.frame_count as usize {
+                if base + f < total_layers as usize {
+                    animation_meta[base + f] = [entry.timeline_offset, entry.timeline_len, ft_field];
+                }
+            }
+        } else {
+            animation_meta[base] = [0, 0, 0];
+        }
+    }
+    let mut meta_bytes = Vec::with_capacity(animation_meta.len() * 12);
+    for row in &animation_meta {
+        meta_bytes.extend_from_slice(&row[0].to_le_bytes());
+        meta_bytes.extend_from_slice(&row[1].to_le_bytes());
+        meta_bytes.extend_from_slice(&row[2].to_le_bytes());
+    }
+    fs::write("assets/textures/animation_meta.bin", &meta_bytes)?;
 
     let manifest = Manifest {
         total_layers,

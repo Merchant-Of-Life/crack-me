@@ -2,12 +2,29 @@
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
+    pub sky_dampen: u32,
+    pub tick_count: u32,
+    pub _pad: [u32; 2],
 }
+
+const _: () = assert!(std::mem::size_of::<CameraUniform>() == 80);
 
 impl CameraUniform {
     pub fn new(matrix: glam::Mat4) -> Self {
         Self {
             view_proj: matrix.to_cols_array_2d(),
+            sky_dampen: 0,
+            tick_count: 0,
+            _pad: [0, 0],
+        }
+    }
+
+    pub fn new_full(matrix: glam::Mat4, sky_dampen: u32, tick_count: u32) -> Self {
+        Self {
+            view_proj: matrix.to_cols_array_2d(),
+            sky_dampen,
+            tick_count,
+            _pad: [0, 0],
         }
     }
 }
@@ -20,6 +37,8 @@ pub struct Camera {
     pub fov_y: f32,
     pub z_near: f32,
     pub z_far: f32,
+    pub sky_dampen: u32,
+    pub tick_count: u32,
 }
 
 impl Camera {
@@ -32,6 +51,8 @@ impl Camera {
             fov_y: 70.0f32.to_radians(),
             z_near: 0.1,
             z_far: 1000.0,
+            sky_dampen: 0,
+            tick_count: 0,
         }
     }
 
@@ -42,6 +63,10 @@ impl Camera {
     }
 
     pub fn build_uniform(&self) -> CameraUniform {
-        CameraUniform::new(self.build_view_projection_matrix())
+        CameraUniform::new_full(
+            self.build_view_projection_matrix(),
+            self.sky_dampen,
+            self.tick_count,
+        )
     }
 }

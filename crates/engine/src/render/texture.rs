@@ -1,17 +1,21 @@
 use std::error::Error;
 use std::fs;
 use std::path::Path;
+use wgpu::util::DeviceExt;
 
-/// Texture2DArray resource containing the 5 pre-baked mipmap levels of all block textures.
+/// Texture2DArray resource containing the 5 pre-baked mipmap levels of all block textures,
+/// alongside storage buffers for animation metadata and tick timelines.
 pub struct TextureArray {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub total_layers: u32,
+    pub meta_buffer: wgpu::Buffer,
+    pub timeline_buffer: wgpu::Buffer,
 }
 
 impl TextureArray {
-    /// Loads the 5 pre-baked mip binaries from `assets/textures/` and uploads them to the GPU.
+    /// Loads the 5 pre-baked mip binaries and animation tables from `assets/textures/` and uploads them to the GPU.
     pub fn from_assets(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -31,20 +35,46 @@ impl TextureArray {
         let mip3 = fs::read(textures_dir.join("block_layers_mip3_2x2.rgba8"))?;
         let mip4 = fs::read(textures_dir.join("block_layers_mip4_1x1.rgba8"))?;
 
-        Self::from_mip_buffers(
+        let meta_bytes = fs::read(textures_dir.join("animation_meta.bin"))?;
+        let timeline_bytes = fs::read(textures_dir.join("animation_timeline.bin"))?;
+
+        Self::from_mip_buffers_with_animation(
             device,
             queue,
             total_layers,
             [&mip0, &mip1, &mip2, &mip3, &mip4],
+            &meta_bytes,
+            &timeline_bytes,
         )
     }
 
-    /// Uploads raw bytes for the 5 mipmap levels [16x16, 8x8, 4x4, 2x2, 1x1] into a Texture2DArray.
+    /// Uploads raw bytes for the 5 mipmap levels with default zeroed animation storage buffers.
     pub fn from_mip_buffers(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         total_layers: u32,
         mips: [&[u8]; 5],
+    ) -> Result<Self, Box<dyn Error>> {
+        let dummy_meta = vec![0u8; (total_layers.max(1) as usize) * 12];
+        let dummy_timeline = vec![0u8; 4];
+        Self::from_mip_buffers_with_animation(
+            device,
+            queue,
+            total_layers,
+            mips,
+            &dummy_meta,
+            &dummy_timeline,
+        )
+    }
+
+    /// Uploads raw bytes for the 5 mipmap levels [16x16, 8x8, 4x4, 2x2, 1x1] and animation storage buffers into a TextureArray.
+    pub fn from_mip_buffers_with_animation(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        total_layers: u32,
+        mips: [&[u8]; 5],
+        meta_bytes: &[u8],
+        timeline_bytes: &[u8],
     ) -> Result<Self, Box<dyn Error>> {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("block_textures_2d_array"),
@@ -117,11 +147,25 @@ impl TextureArray {
             ..Default::default()
         });
 
+        let meta_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("animation_meta_buffer"),
+            contents: meta_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let timeline_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("animation_timeline_buffer"),
+            contents: timeline_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
         Ok(Self {
             texture,
             view,
             sampler,
             total_layers,
+            meta_buffer,
+            timeline_buffer,
         })
     }
 

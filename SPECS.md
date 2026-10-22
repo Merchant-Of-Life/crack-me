@@ -665,20 +665,36 @@ flowchart TD
   curve and 0.05 floor. sky_dampen / tick_count changes MUST NOT re-mesh.
   [APPROX-RENDERING-03] day multiply stays neutral (1.0) — dampen is the sole
   day-night control in v1.
-- **Animated Texture Frames (Step 5A pin; bake contract already on disk)**:
-  `assets/textures/animation_timeline.bin` = 8,548 u32 frame ids (34,192 B,
-  byte-size verified == `timeline_total_u32` × 4); per-texture
-  `timeline_offset` / `timeline_len` in `texture_manifest.json` sum exactly to
-  it. Runtime frame resolution is SHADER-side from `tick_count`:
-  `layer_id = timeline[offset + (tick_count / frametime) % len]` via a
-  bake-emitted per-layer meta table `animation_meta.bin` — 1844 rows ×
-  [u32 offset, u32 len, u32 frametime]. The bake must be extended once:
-  manifest currently lacks per-texture `frametime` (extract it from the
-  extracted `block_mcmetas/*.png.mcmeta` at bake time — frame sequences and
-  offsets already exist; no image re-work). Frame swaps cause NO re-meshing and
-  no extra vertex data. Textures flagged `interpolate: true` (23 in the
-  current manifest) freeze at `timeline[offset]` — interpolated blending is
-  deferred as [APPROX-RENDERING-10].
+- **Animated Texture Frames (Step 5A pin; VERIFIED against disk 2026-10-22)**:
+  `assets/textures/animation_timeline.bin` = 8,548 u32 entries (34,192 B ==
+  `timeline_total_u32` × 4). Entries are 0-based FRAME INDICES relative to the
+  texture's `base_layer` (overall max entry = 31), NOT absolute layer ids.
+  `timeline_len` is the FULL CYCLE LENGTH IN GAME TICKS, pre-expanded at bake
+  time — the bake already consumed each mcmeta's `frametime` (and explicit
+  `frames` arrays) when writing the binary: `len == frametime × frame_count`
+  holds for the 52 no-explicit-frames textures (water 32×2=64, campfire 8×2=16,
+  magma 3×8=24, blast furnace 2×10=20); explicit-frame mcmetas (lava_still len
+  76, prismarine len 6600) carry their full cycle verbatim. Runtime resolution
+  is SHADER-side with NO frametime division (a division would re-scale
+  already-tick-accurate cycles): `frame_idx = timeline[offset + tick_count %
+  len]`, `resolved = base_layer + frame_idx`, driven by
+  `CameraUniform.tick_count` (20 Hz). Frame swaps cause NO re-meshing and no
+  extra vertex data. The bake emits `animation_meta.bin` = 1844 rows ×
+  [u32 offset, u32 len, u32 frametime] covering ALL layers (per-layer
+  ownership, engine-added 1840..1843 static): static rows get
+  0/0/0; `interpolate: true` textures (23) get frametime=0 with their real
+  offset/len (freeze at `timeline[offset]`, [APPROX-RENDERING-10]); playing
+  textures get frametime=1 (one tick per slot). The MANIFEST additionally
+  records each texture's TRUE mcmeta `frametime` (default 1 per vanilla
+  semantics) as an audit field only — it is NOT part of the runtime index
+  math. Every `animated` texture must have a meta row with `len ≥ 1`; every
+  static layer row `len == 0`. CONSUMER INVARIANT (review pin, 2026-10-22):
+  resolve math adds `frame_idx` to the VERTEX layer word, so mesh vertices
+  MUST carry a texture's `base_layer` — registry face rows may reference only
+  static layers or animated bases, never an animated `base + k` (k > 0) — and
+  `animation_meta.bin` mid-frame rows are lookup coverage only, never resolve
+  keys. A registry-wide golden test MUST enforce this (no animated non-base
+  face reference, all face layers declared in the manifest).
 - **Windowed Surface (Step 5A pin)**: `GpuContext::new_windowed` selects an
   sRGB surface format (assert `format.is_srgb()`), parameterizes
   `TerrainPipelines::new(device, color_format, depth_format)`; `new_headless`
@@ -686,6 +702,23 @@ flowchart TD
   reuse the headless limit discipline (2048 texture-array layers in
   `required_limits` + adapter validation). Startup prints adapter name,
   backend, and selected surface format.
+- **Viewer Control Contract (Step 5A, user-approved plan; pinned by review
+  2026-10-22 — anchors the voxel_viewer bin)**:
+  - WASD = horizontal walk; `Space` = ASCEND (pinned — never dampen), `LShift`
+    (left or right) = descend, `LControl` = sprint multiplier.
+  - Click = grab pointer (`CursorGrabMode::Locked`, cursor hidden); `Esc` =
+    release the grab; a second `Esc` while ungrabbed exits the app.
+  - Look input = pointer deltas received while grabbed; MUST work on Wayland
+    (review desktop is Hyprland) — do not depend on button-held drag-look.
+  - Title telemetry every 0.5 s: FPS, dampen, tick; startup line prints
+    adapter | backend | surface format | FPS (one line).
+  - Dampen keys: `N` = +1, `M` = −1, clamped 0..=15.
+  - Showcase world: 6×6 section grid; ONLY the inner 4×4 sections mesh, each
+    ONLY after all 8 horizontal neighbors exist (wait-for-8 halo gate — the
+    step-5 remesh wiring foundation). Excluded blocks: torch, leaf_litter,
+    lily_pad. Required content: glowstone, lit furnace (animated front), lava
+    pool (76-tick animated fluid), magma (24-tick animated), clear + stained
+    glass, ice vs packed_ice peak, sideways logs on both horizontal axes.
 - **Vanilla Layer Dispatch — VERIFIED (review 2026-10-22, `ChunkSectionLayer.java` release-jar decompile)**:
   vanilla 26.3 has THREE section layers — `SOLID` / `CUTOUT` / `TRANSLUCENT`.
   `ChunkSectionLayer.byTransparency(Transparency)` maps the per-quad material
