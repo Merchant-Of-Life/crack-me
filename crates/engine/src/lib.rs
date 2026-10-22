@@ -3,6 +3,7 @@ use bytemuck::{Pod, Zeroable};
 pub mod bfs;
 pub mod light;
 pub mod mesher;
+pub mod noise;
 pub mod physics;
 pub mod registry;
 pub mod render;
