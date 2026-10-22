@@ -4,6 +4,7 @@ pub mod bfs;
 pub mod light;
 pub mod mesher;
 pub mod registry;
+pub mod render;
 
 pub use bfs::{recompute_light_column, LightComputeResult, NeighborChunkLights, CARDINAL_DIRECTIONS};
 pub use light::{
@@ -18,8 +19,8 @@ pub use mesher::{
 pub use registry::{
     BlockIndexEntry, BlockRegistry, BlockStateEntry, FaceInfo, RegistryError, CULL_LAVA,
     CULL_LEAVES, CULL_OPAQUE, CULL_TRANSPARENT_START, CULL_WATER, FACE_DOWN, FACE_EAST,
-    FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST, MESH_COMPLEX, MESH_CROSS, MESH_CUBE, MESH_EMPTY,
-    MESH_FLUID,
+    FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST, LAYER_CUTOUT, LAYER_CUTOUT_MIPPED, LAYER_SOLID,
+    LAYER_TRANSLUCENT, MESH_COMPLEX, MESH_CROSS, MESH_CUBE, MESH_EMPTY, MESH_FLUID,
 };
 
 /// Exactly 64-bit packed voxel vertex according to SPECS.md
@@ -878,7 +879,7 @@ mod tests {
 
         // Verify all 6 directions are present
         let mut normal_counts = [0usize; 6];
-        for v in &mesh.vertices {
+        for v in &mesh.opaque {
             normal_counts[v.normal_id() as usize] += 1;
         }
         for (i, count) in normal_counts.iter().enumerate() {
@@ -925,7 +926,7 @@ mod tests {
 
         let mesh = mesh_section(&halo, &reg);
         // Find UP faces (normal_id == 0)
-        let up_vertices: Vec<_> = mesh.vertices.iter().filter(|v| v.normal_id() == 0).collect();
+        let up_vertices: Vec<_> = mesh.opaque.iter().filter(|v| v.normal_id() == 0).collect();
         // UP faces must NOT merge into a single quad because the light step at x=8 splits them
         assert!(up_vertices.len() > 6, "UP faces must not merge across light step boundary");
     }
@@ -936,6 +937,7 @@ mod tests {
             base_layer: 100,
             tint_mode: 0,
             uv_rot: 0,
+            pass_bucket: 0,
             corner_ao: [1, 3, 3, 3], // corner 0 in shadow
             corner_sky: [15, 15, 15, 15],
             corner_block: [0, 0, 0, 0],
@@ -1111,6 +1113,7 @@ mod tests {
             base_layer: 1,
             tint_mode: 0,
             uv_rot: 0,
+            pass_bucket: 0,
             corner_ao: [3, 3, 3, 3], // symmetric -> flip = false
             corner_sky: [15, 15, 15, 15],
             corner_block: [0, 0, 0, 0],
@@ -1120,6 +1123,7 @@ mod tests {
             base_layer: 1,
             tint_mode: 0,
             uv_rot: 0,
+            pass_bucket: 0,
             corner_ao: [1, 3, 3, 3], // d02 (4) < d13 (6) -> flip = true
             corner_sky: [15, 15, 15, 15],
             corner_block: [0, 0, 0, 0],
@@ -1157,5 +1161,148 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_render_layers_golden() {
+        let reg = load_oracle_registry();
+
+        // 1. stone == LAYER_SOLID (0)
+        let stone = reg.get_block("stone").expect("stone in registry");
+        let stone_state = reg.get_state(stone.state_start).unwrap();
+        assert_eq!(stone_state.render_layer(), LAYER_SOLID, "stone must be LAYER_SOLID");
+
+        // 2. copper_grate == LAYER_CUTOUT (2)
+        let copper_grate = reg.get_block("copper_grate").expect("copper_grate in registry");
+        let copper_grate_state = reg.get_state(copper_grate.state_start).unwrap();
+        assert_eq!(copper_grate_state.render_layer(), LAYER_CUTOUT, "copper_grate must be LAYER_CUTOUT");
+
+        // Weathered / waxed copper grates parity
+        for prefix in ["exposed_", "weathered_", "oxidized_", "waxed_", "waxed_exposed_", "waxed_weathered_", "waxed_oxidized_"] {
+            let name = format!("{prefix}copper_grate");
+            let b = reg.get_block(&name).unwrap_or_else(|| panic!("{name} in registry"));
+            let s = reg.get_state(b.state_start).unwrap();
+            assert_eq!(s.render_layer(), LAYER_CUTOUT, "{name} must be LAYER_CUTOUT");
+        }
+
+        // 3. white_stained_glass == LAYER_TRANSLUCENT (3)
+        let white_stained_glass = reg.get_block("white_stained_glass").expect("white_stained_glass in registry");
+        let white_stained_glass_state = reg.get_state(white_stained_glass.state_start).unwrap();
+        assert_eq!(white_stained_glass_state.render_layer(), LAYER_TRANSLUCENT, "white_stained_glass must be LAYER_TRANSLUCENT");
+
+        // 4. oak_leaves == LAYER_CUTOUT_MIPPED (1)
+        let oak_leaves = reg.get_block("oak_leaves").expect("oak_leaves in registry");
+        let oak_leaves_state = reg.get_state(oak_leaves.state_start).unwrap();
+        assert_eq!(oak_leaves_state.render_layer(), LAYER_CUTOUT_MIPPED, "oak_leaves must be LAYER_CUTOUT_MIPPED");
+
+        // 5. pale_oak_leaves == LAYER_CUTOUT_MIPPED (1)
+        let pale_oak_leaves = reg.get_block("pale_oak_leaves").expect("pale_oak_leaves in registry");
+        let pale_oak_leaves_state = reg.get_state(pale_oak_leaves.state_start).unwrap();
+        assert_eq!(pale_oak_leaves_state.render_layer(), LAYER_CUTOUT_MIPPED, "pale_oak_leaves must be LAYER_CUTOUT_MIPPED");
+    }
+
+    #[test]
+    fn test_grass_block_side_composite_golden() {
+        let reg = load_oracle_registry();
+        let grass = reg.get_block("grass_block").expect("grass_block in registry");
+        let state = reg.get_state(grass.state_start).unwrap();
+
+        // 1. Top face is grass-tinted (TINT_GRASS = 1)
+        assert_eq!(state.faces[FACE_UP].tint_mode, 1, "top face must be TINT_GRASS");
+
+        // 2. Bottom face is dirt (TINT_NONE = 0)
+        assert_eq!(state.faces[FACE_DOWN].tint_mode, 0, "bottom face must be TINT_NONE");
+
+        // 3. Side faces must use the bake-added composite layer with tint_mode = 0 [APPROX-RENDERING-09]
+        let side_layer = state.faces[FACE_NORTH].base_layer;
+        assert_eq!(side_layer, 1843, "grass_block side face must point to composite layer 1843");
+        for f in [FACE_NORTH, FACE_SOUTH, FACE_EAST, FACE_WEST] {
+            assert_eq!(state.faces[f].base_layer, side_layer, "all 4 side faces must match composite layer");
+            assert_eq!(state.faces[f].tint_mode, 0, "side faces must have tint_mode 0 to prevent recoloring dirt [APPROX-RENDERING-09]");
+        }
+    }
+
+    #[test]
+    fn test_adapter_limits_validation_seam() {
+        let mut limits = wgpu::Limits::downlevel_defaults();
+
+        // 1. Success when >= 2048
+        limits.max_texture_array_layers = 2048;
+        assert!(render::validate_adapter_limits(&limits).is_ok());
+
+        limits.max_texture_array_layers = 4096;
+        assert!(render::validate_adapter_limits(&limits).is_ok());
+
+        // 2. Descriptive error when < 2048
+        limits.max_texture_array_layers = 256;
+        let err = render::validate_adapter_limits(&limits).unwrap_err();
+        assert!(err.contains("max_texture_array_layers is 256"));
+        assert!(err.contains("required >= 2048"));
+    }
+
+    #[test]
+    fn test_gpu_context_probe() {
+        let ctx_res = render::GpuContext::new_headless();
+        match ctx_res {
+            Ok(ctx) => {
+                let info = ctx.adapter.get_info();
+                println!("Headless Adapter Info: {:?}", info);
+                println!("max_texture_array_layers: {}", ctx.adapter.limits().max_texture_array_layers);
+                assert!(ctx.adapter.limits().max_texture_array_layers >= 2048);
+            }
+            Err(e) => {
+                println!("No headless GPU adapter found in environment: {}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_render_layer_auto_split_stone_and_water() {
+        let reg = load_oracle_registry();
+        let stone_id = state_id_of(&reg, "stone");
+        let water_id = state_id_of(&reg, "water");
+        let air_id = state_id_of(&reg, "air");
+
+        let stone_state = reg.get_state(stone_id as u32).unwrap();
+        let water_state = reg.get_state(water_id as u32).unwrap();
+        assert_eq!(stone_state.render_layer(), LAYER_SOLID, "stone must be LAYER_SOLID (0)");
+        assert_eq!(water_state.render_layer(), LAYER_TRANSLUCENT, "water must be LAYER_TRANSLUCENT (3)");
+
+        let mut halo = SectionHalo::new();
+        // Section: bottom half (y=0..8) stone, top half (y=8..16) water, surrounded by air
+        for z in -1..=16 {
+            for x in -1..=16 {
+                for y in -1..=16 {
+                    if (0..8).contains(&y) && (0..16).contains(&x) && (0..16).contains(&z) {
+                        halo.set_voxel(x, y, z, stone_id);
+                    } else if (8..16).contains(&y) && (0..16).contains(&x) && (0..16).contains(&z) {
+                        halo.set_voxel(x, y, z, water_id);
+                    } else {
+                        halo.set_voxel(x, y, z, air_id);
+                    }
+                }
+            }
+        }
+
+        let mesh = mesh_section(&halo, &reg);
+
+        // Assert both pass streams are populated
+        assert!(!mesh.opaque.is_empty(), "opaque stream must contain stone quads");
+        assert!(!mesh.translucent.is_empty(), "translucent stream must contain water quads");
+
+        let stone_layer = stone_state.faces[FACE_UP].base_layer;
+        let water_layer = water_state.faces[FACE_UP].base_layer;
+
+        // Verify clean segregation: NO water in opaque, NO stone in translucent
+        for v in &mesh.opaque {
+            assert_eq!(v.base_layer(), stone_layer as u32, "mesh.opaque must only contain stone quads");
+        }
+        for v in &mesh.translucent {
+            assert_eq!(v.base_layer(), water_layer as u32, "mesh.translucent must only contain water quads");
+        }
+
+        // Verify total vertices and combined view
+        assert_eq!(mesh.vertex_count(), mesh.opaque.len() + mesh.translucent.len());
+        assert_eq!(mesh.combined().len(), mesh.vertex_count());
     }
 }

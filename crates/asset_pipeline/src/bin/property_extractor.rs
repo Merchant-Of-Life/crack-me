@@ -126,20 +126,11 @@ fn parse_weathering_copper_prefixes(decomp_dir: &Path) -> Vec<String> {
         }
     }
     eprintln!(
-        "\n⚠️  [DIAGNOSTIC WARNING] WeatheringCopperCollection.java not found at {:?} or failed to parse!\n\
-         Falling back to static prefixes. Run Vineflower decompile to prevent coverage shrinkage.\n",
+        "\n❌ [FATAL ERROR] Required oracle file WeatheringCopperCollection.java not found at {:?} or failed to parse PREFIXES!\n\
+         Decompile from release jar via Vineflower into ~/.minecraft-decomp/src/ to continue.\n",
         coll_path
     );
-    vec![
-        "".to_string(),
-        "exposed_".to_string(),
-        "weathered_".to_string(),
-        "oxidized_".to_string(),
-        "waxed_".to_string(),
-        "waxed_exposed_".to_string(),
-        "waxed_weathered_".to_string(),
-        "waxed_oxidized_".to_string(),
-    ]
+    std::process::exit(1);
 }
 
 fn parse_copper_block_special_names(decomp_dir: &Path) -> Vec<String> {
@@ -172,16 +163,140 @@ fn parse_copper_block_special_names(decomp_dir: &Path) -> Vec<String> {
         }
     }
     eprintln!(
-        "\n⚠️  [DIAGNOSTIC WARNING] BlockItemIds.java not found at {:?} or failed to parse!\n\
-         Falling back to static special names. Run Vineflower decompile to prevent coverage shrinkage.\n",
+        "\n❌ [FATAL ERROR] Required oracle file BlockItemIds.java not found at {:?} or failed to parse COPPER_BLOCK_SPECIAL_NAMES!\n\
+         Decompile from release jar via Vineflower into ~/.minecraft-decomp/src/ to continue.\n",
         ids_path
     );
-    vec![
-        "copper_block".to_string(),
-        "copper".to_string(),
-        "copper".to_string(),
-        "copper".to_string(),
-    ]
+    std::process::exit(1);
+}
+
+/// Detects blocks that are currently classified as `solid` in `render_layers` but whose
+/// model textures contain transparent/cutout pixels (alpha < 255).
+/// In vanilla 26.3, these blocks are CUTOUT via `byTransparency` on their quad sprites,
+/// but their Properties were constructed via helper methods (like `torchProperties()`)
+/// or custom Block classes without an inline `.noOcclusion()` call.
+/// Flagging them in the coverage report ensures transparency for complex-mesh re-derivation.
+fn detect_helper_undershoots(
+    registry_blocks: &BTreeSet<String>,
+    render_layers: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Ok(manifest_str) = fs::read_to_string("assets/textures/texture_manifest.json") else {
+        return Vec::new();
+    };
+    let Ok(manifest_val): Result<J, _> = serde_json::from_str(&manifest_str) else {
+        return Vec::new();
+    };
+    let Some(textures) = manifest_val.get("textures").and_then(|t| t.as_object()) else {
+        return Vec::new();
+    };
+    let Ok(mip0_bytes) = fs::read("assets/textures/block_layers_mip0_16x16.rgba8") else {
+        return Vec::new();
+    };
+
+    let mut layer_has_alpha: BTreeMap<String, bool> = BTreeMap::new();
+    for (name, entry) in textures {
+        let Some(base_layer) = entry.get("base_layer").and_then(|l| l.as_u64()) else { continue };
+        let offset = (base_layer as usize) * 1024;
+        let mut has_alpha = false;
+        if offset + 1024 <= mip0_bytes.len() {
+            for pixel in mip0_bytes[offset..offset + 1024].chunks_exact(4) {
+                if pixel[3] < 255 {
+                    has_alpha = true;
+                    break;
+                }
+            }
+        }
+        layer_has_alpha.insert(name.clone(), has_alpha);
+    }
+
+    let mut undershoots = Vec::new();
+    for block in registry_blocks {
+        let is_solid = render_layers.get(block).map(|s| s.as_str()).unwrap_or("solid") == "solid";
+        if !is_solid {
+            continue;
+        }
+
+        let bs_path = format!("assets/blockstates/{}.json", block);
+        let Ok(bs_str) = fs::read_to_string(&bs_path) else { continue };
+        let Ok(bs_val): Result<J, _> = serde_json::from_str(&bs_str) else { continue };
+
+        let mut model_names = BTreeSet::new();
+        if let Some(variants) = bs_val.get("variants").and_then(|v| v.as_object()) {
+            for v in variants.values() {
+                if let Some(arr) = v.as_array() {
+                    for item in arr {
+                        if let Some(m) = item.get("model").and_then(|s| s.as_str()) {
+                            model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                        }
+                    }
+                } else if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
+                    model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                }
+            }
+        }
+        if let Some(multipart) = bs_val.get("multipart").and_then(|m| m.as_array()) {
+            for part in multipart {
+                if let Some(apply) = part.get("apply") {
+                    if let Some(arr) = apply.as_array() {
+                        for item in arr {
+                            if let Some(m) = item.get("model").and_then(|s| s.as_str()) {
+                                model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                            }
+                        }
+                    } else if let Some(m) = apply.get("model").and_then(|s| s.as_str()) {
+                        model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                    }
+                }
+            }
+        }
+
+        let mut has_cutout_tex = false;
+        for m_name in model_names {
+            let mut cur_model = m_name;
+            for _ in 0..8 {
+                let m_path = format!("assets/models/block/{}.json", cur_model);
+                let Ok(m_str) = fs::read_to_string(&m_path) else { break; };
+                let Ok(m_val): Result<J, _> = serde_json::from_str(&m_str) else { break; };
+                if let Some(tex_obj) = m_val.get("textures").and_then(|t| t.as_object()) {
+                    for t_val in tex_obj.values() {
+                        let t_str_opt = if let Some(s) = t_val.as_str() {
+                            Some(s.to_string())
+                        } else if let Some(s) = t_val.get("sprite").and_then(|s| s.as_str()) {
+                            Some(s.to_string())
+                        } else {
+                            None
+                        };
+                        if let Some(t_str) = t_str_opt {
+                            if !t_str.starts_with('#') {
+                                let clean_t = t_str.replace("minecraft:block/", "").replace("block/", "");
+                                if layer_has_alpha.get(&clean_t).copied().unwrap_or(false) {
+                                    has_cutout_tex = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if has_cutout_tex {
+                    break;
+                }
+                if let Some(parent) = m_val.get("parent").and_then(|p| p.as_str()) {
+                    cur_model = parent.replace("minecraft:block/", "").replace("block/", "");
+                } else {
+                    break;
+                }
+            }
+            if has_cutout_tex {
+                break;
+            }
+        }
+
+        if has_cutout_tex {
+            undershoots.push(block.clone());
+        }
+    }
+
+    undershoots
 }
 
 /// Block name from the registration FIELD (left side of `=`). Field names track the
@@ -534,6 +649,7 @@ fn main() {
     let mut no_occlusion: BTreeSet<String> = BTreeSet::new();
     let mut skylight: BTreeSet<String> = BTreeSet::new();
     let mut cull_classes: BTreeMap<String, String> = BTreeMap::new();
+    let mut render_layers: BTreeMap<String, String> = BTreeMap::new();
     let mut diagnostics: Vec<String> = vec![];
 
     for (decl_line, raw) in reg_bodies(&src) {
@@ -603,6 +719,35 @@ fn main() {
             }
         }
 
+        // Render layer harvest:
+        // - leaves -> cutout_mipped (LAYER_CUTOUT_MIPPED = 1)
+        // - translucent (stained glass, stained glass panes, ice, frosted ice, tinted glass, slime, honey, water) -> translucent (LAYER_TRANSLUCENT = 3)
+        // - cutout (copper grates, glass, glass panes, doors, trapdoors, other noOcclusion) -> cutout (LAYER_CUTOUT = 2)
+        // - default -> solid (LAYER_SOLID = 0)
+        let is_translucent = is_water
+            || base == "bubble_column"
+            || body.contains("StainedGlassBlock")
+            || body.contains("StainedGlassPaneBlock")
+            || body.contains("IceBlock")
+            || body.contains("FrostedIceBlock")
+            || body.contains("TintedGlassBlock")
+            || body.contains("SlimeBlock")
+            || body.contains("HoneyBlock");
+
+        if is_leaves {
+            for id in &ids {
+                render_layers.insert(id.clone(), "cutout_mipped".to_string());
+            }
+        } else if is_translucent {
+            for id in &ids {
+                render_layers.insert(id.clone(), "translucent".to_string());
+            }
+        } else if body.contains(".noOcclusion()") {
+            for id in &ids {
+                render_layers.insert(id.clone(), "cutout".to_string());
+            }
+        }
+
         // provenance patching happens after legacy resolution below
         let _ = decl_line;
     }
@@ -627,6 +772,11 @@ fn main() {
                     if !cull_classes.contains_key(&origin) {
                         if let Some(cc) = cull_classes.get(&cur).cloned() {
                             cull_classes.insert(origin.clone(), cc);
+                        }
+                    }
+                    if !render_layers.contains_key(&origin) {
+                        if let Some(rl) = render_layers.get(&cur).cloned() {
+                            render_layers.insert(origin.clone(), rl);
                         }
                     }
                     match records.get(&cur) {
@@ -666,6 +816,7 @@ fn main() {
     let no_occlusion_n = no_occlusion.len();
     let skylight_n = skylight.len();
     let cull_classes_n = cull_classes.len();
+    let render_layers_n = render_layers.len();
 
     // Coverage report: scan registry blockstates from assets/blockstates
     let blockstates_dir = Path::new("assets/blockstates");
@@ -681,11 +832,26 @@ fn main() {
         }
     }
 
+    let mut count_cutout_mipped = 0usize;
+    let mut count_cutout = 0usize;
+    let mut count_translucent = 0usize;
+    let mut count_solid = 0usize;
+
+    for b in &registry_blocks {
+        match render_layers.get(b).map(|s| s.as_str()) {
+            Some("cutout_mipped") => count_cutout_mipped += 1,
+            Some("cutout") => count_cutout += 1,
+            Some("translucent") => count_translucent += 1,
+            _ => count_solid += 1,
+        }
+    }
+
     let mut covered_blocks: BTreeSet<String> = BTreeSet::new();
     covered_blocks.extend(emit_map.keys().cloned());
     covered_blocks.extend(no_occlusion.iter().cloned());
     covered_blocks.extend(skylight.iter().cloned());
     covered_blocks.extend(cull_classes.keys().cloned());
+    covered_blocks.extend(render_layers.keys().cloned());
 
     let unharvested_from_blocks_java: Vec<String> = registry_blocks
         .iter()
@@ -704,7 +870,20 @@ fn main() {
     println!("Blocks harvested from Blocks.java: {}", all_harvested_ids.len());
     println!("Blocks with non-default properties (covered by at least 1 map): {}", covered_blocks.len());
     println!("Blocks absent from Blocks.java harvest ({}): {:?}", unharvested_from_blocks_java.len(), unharvested_from_blocks_java);
-    println!("Blocks with standard opaque defaults (absent from all 4 maps): {}", absent_from_all_maps.len());
+    println!("Blocks with standard opaque defaults (absent from all 5 maps): {}", absent_from_all_maps.len());
+    println!(
+        "Render layers breakdown (of {} registry blocks): {} solid, {} cutout_mipped, {} cutout, {} translucent",
+        registry_blocks.len(),
+        count_solid,
+        count_cutout_mipped,
+        count_cutout,
+        count_translucent
+    );
+    let flagged_helper_undershoots = detect_helper_undershoots(&registry_blocks, &render_layers);
+    println!(
+        "Helper-class undershoots flagged (solid in registry but model has cutout/alpha textures): {} blocks",
+        flagged_helper_undershoots.len()
+    );
     println!("=================================================================");
 
     let json = json!({
@@ -718,12 +897,21 @@ fn main() {
         "no_occlusion": no_occlusion.into_iter().collect::<Vec<_>>(),
         "skylight": skylight.into_iter().collect::<Vec<_>>(),
         "cull_classes": cull_classes,
+        "render_layers": render_layers,
         "coverage_report": {
             "total_registry_blocks": registry_blocks.len(),
             "harvested_blocks": all_harvested_ids.len(),
             "unharvested_blocks": unharvested_from_blocks_java,
             "blocks_with_custom_properties": covered_blocks.len(),
             "blocks_with_opaque_defaults": absent_from_all_maps.len(),
+            "render_layers_breakdown": {
+                "solid": count_solid,
+                "cutout_mipped": count_cutout_mipped,
+                "cutout": count_cutout,
+                "translucent": count_translucent,
+                "flagged_helper_undershoots_count": flagged_helper_undershoots.len(),
+                "flagged_helper_undershoots": flagged_helper_undershoots,
+            },
         },
     });
 
@@ -734,11 +922,12 @@ fn main() {
         .expect("write block_properties.json");
 
     println!(
-        "block_properties.json: {} emission entries, {} noOcclusion, {} skylight, {} cull_classes; {} problems",
+        "block_properties.json: {} emission entries, {} noOcclusion, {} skylight, {} cull_classes, {} non-solid render_layers; {} problems",
         emit_map.len(),
         no_occlusion_n,
         skylight_n,
         cull_classes_n,
+        render_layers_n,
         diagnostics.len()
     );
     for w in &diagnostics {

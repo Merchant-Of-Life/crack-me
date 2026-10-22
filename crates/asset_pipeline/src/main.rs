@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use image::{imageops, DynamicImage, GenericImageView, ImageFormat, RgbaImage};
 use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
+use asset_pipeline::{apply_linear_tint, linear_to_srgb, srgb_to_linear};
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
@@ -54,24 +55,6 @@ pub struct Manifest {
     pub textures: BTreeMap<String, TextureEntry>,
 }
 
-#[inline(always)]
-fn srgb_to_linear(s: f32) -> f32 {
-    if s <= 0.04045 {
-        s / 12.92
-    } else {
-        ((s + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-#[inline(always)]
-fn linear_to_srgb(l: f32) -> f32 {
-    let l = l.clamp(0.0, 1.0);
-    if l <= 0.0031308 {
-        l * 12.92
-    } else {
-        1.055 * l.powf(1.0 / 2.4) - 0.055
-    }
-}
 
 /// Detects if an RGBA buffer is a cutout (contains both transparent and opaque pixels)
 fn is_cutout(rgba: &[u8]) -> bool {
@@ -187,30 +170,6 @@ fn downsample_linear_2x(
     (dst, dst_w, dst_h)
 }
 
-/// Applies fixed color tint in linear RGB space
-fn apply_linear_tint(src_16x16: &[u8], tint_hex: u32) -> Vec<u8> {
-    let tr = srgb_to_linear(((tint_hex >> 16) & 0xFF) as f32 / 255.0);
-    let tg = srgb_to_linear(((tint_hex >> 8) & 0xFF) as f32 / 255.0);
-    let tb = srgb_to_linear((tint_hex & 0xFF) as f32 / 255.0);
-
-    let mut out = Vec::with_capacity(src_16x16.len());
-    for chunk in src_16x16.chunks_exact(4) {
-        let r = srgb_to_linear(chunk[0] as f32 / 255.0);
-        let g = srgb_to_linear(chunk[1] as f32 / 255.0);
-        let b = srgb_to_linear(chunk[2] as f32 / 255.0);
-        let a = chunk[3];
-
-        let tinted_r = linear_to_srgb(r * tr);
-        let tinted_g = linear_to_srgb(g * tg);
-        let tinted_b = linear_to_srgb(b * tb);
-
-        out.push((tinted_r * 255.0).round() as u8);
-        out.push((tinted_g * 255.0).round() as u8);
-        out.push((tinted_b * 255.0).round() as u8);
-        out.push(a);
-    }
-    out
-}
 
 /// Downsamples an image of size (w, h) down to 16x16 in successive 2x steps
 fn downsample_to_16x16(img: &DynamicImage) -> Vec<u8> {
@@ -502,6 +461,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             eprintln!("Warning: Could not find base texture '{}' to pre-tint", src_name);
         }
+    }
+
+    // Composite grass_block_side_overlay over grass_block_side with Plains grass tint 0x79C05A [APPROX-RENDERING-07, APPROX-RENDERING-09]
+    let overlay_composite_name = "grass_block_side_overlay_composite";
+    if let (Some(dirt_16), Some(overlay_16)) = (
+        base_frames_16x16.get("grass_block_side"),
+        base_frames_16x16.get("grass_block_side_overlay"),
+    ) {
+        let tinted_overlay = apply_linear_tint(overlay_16, 0x79C05A);
+        let mut composite = dirt_16.clone();
+        for (comp_chunk, over_chunk) in composite.chunks_exact_mut(4).zip(tinted_overlay.chunks_exact(4)) {
+            let over_a = over_chunk[3];
+            if over_a == 255 {
+                comp_chunk.copy_from_slice(over_chunk);
+            } else if over_a > 0 {
+                let a = over_a as f32 / 255.0;
+                comp_chunk[0] = (over_chunk[0] as f32 * a + comp_chunk[0] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[1] = (over_chunk[1] as f32 * a + comp_chunk[1] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[2] = (over_chunk[2] as f32 * a + comp_chunk[2] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[3] = 255;
+            }
+        }
+        let target_png_path = out_blocks.join(format!("{}.png", overlay_composite_name));
+        if let Some(r_img) = RgbaImage::from_raw(16, 16, composite.clone()) {
+            let _ = r_img.save_with_format(&target_png_path, ImageFormat::Png);
+        }
+        mip0_layers_rgba8.extend_from_slice(&composite);
+        pre_tinted_layers.insert(overlay_composite_name.to_string(), current_layer);
+        manifest_entries.insert(
+            overlay_composite_name.to_string(),
+            TextureEntry {
+                base_layer: current_layer,
+                original_width: 16,
+                original_height: 16,
+                animated: false,
+                frame_count: 1,
+                interpolate: false,
+                timeline_offset: 0,
+                timeline_len: 0,
+                has_mcmeta: false,
+            },
+        );
+        current_layer += 1;
+    } else {
+        eprintln!("Warning: Could not find grass_block_side or grass_block_side_overlay to composite");
     }
 
     let total_layers = current_layer;

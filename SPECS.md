@@ -432,3 +432,301 @@ flowchart TD
     
     Step3 --> Step4["Step 4: wgpu Graphics Pipeline & Window<br/>• Safe adapter limit validation (needed <= adapter_max)<br/>• Upload 5 mip levels to Texture2DArray<br/>• Timeline storage buffer & Camera UBO<br/>• WGSL shader with day-factor lighting & dynamic colormaps"]
 ```
+
+---
+
+## 6. Step 4: wgpu Graphics Pipeline & Rendering Architecture
+
+### 1. Initialization, Feature Limits & Headless Contract
+- **Required Hardware Limits**:
+  - `wgpu::Limits::max_texture_array_layers >= 2048`.
+  - The engine checks `adapter.limits().max_texture_array_layers` before requesting device; if `< 2048`, it emits a loud, descriptive failure (`panic!` with required vs actual limits) rather than failing during texture upload.
+- **Headless Test Contract**:
+  - All automated tests (`cargo test`) must execute headlessly with ZERO window creation and zero `$DISPLAY` / Wayland dependencies.
+  - Tests request a headless `wgpu::Adapter` (`compatible_surface: None`), render into offscreen `Texture` targets (`RENDER_ATTACHMENT | COPY_SRC`), and read back via staging buffers (`MAP_READ | COPY_DST`) to verify vertex unpacking, rasterization, depth, and lighting.
+
+### 2. Dual-Pass Render Architecture & V1 Approximations
+- **Pass 1: Opaque + Cutout (Single Pass)**:
+  - Depth write enabled: `depth_write_enabled: true`, `depth_compare: wgpu::CompareFunction::LessEqual`.
+  - Blend state: none (`write_mask: ALL`).
+  - Fragment shader: cutout alpha discard uses the vanilla two-tier thresholds —
+    $0.5$ for terrain cutout (`ALPHA_CUTOUT_THRESHOLD_CUTOUT_TERRAIN`,
+    `RenderPipelines.java:25`); the $0.1$ default is reserved for future
+    non-terrain draws. `LessEqual` in this section is authoritative — §6 agrees.
+  - Renders all solid blocks and cutout geometry (leaves, saplings, grates, flowers) into the depth buffer in a single pass.
+- **Pass 2: Translucent (Second Pass)**:
+  - Depth write disabled: `depth_write_enabled: false`, `depth_compare: wgpu::CompareFunction::LessEqual`.
+  - Blend state: standard alpha blending (`src: SrcAlpha`, `dst: OneMinusSrcAlpha`, `op: Add`).
+  - Renders all translucent geometry (water, stained glass, ice).
+- **V1 Approximations**:
+  - `[APPROX-RENDERING-01]` **Translucent Sorting Skip**: Translucent quads and sections are rendered without per-quad depth sorting.
+  - `[APPROX-RENDERING-02]` **Cutout Alpha Threshold** — VERIFIED (review
+    2026-10-22, `RenderPipelines.java:24-25` constant pool, javap):
+    `ALPHA_CUTOUT_THRESHOLD_CUTOUT_TERRAIN = 0.5F` (terrain cutout — ours),
+    `ALPHA_CUTOUT_THRESHOLD_DEFAULT = 0.1F` (non-terrain, future). Jar-exact,
+    no longer an approximation.
+  - `[APPROX-RENDERING-03..05]`: lighting approximations pinned in §6.5 (day_factor scalar ramp, ambient floor, AO curve).
+
+### 3. Per-Section World Placement (`SectionInstance`)
+- `PackedVoxelVertex` coordinates are strictly 5-bit section-local: $x, y, z \in [0, 16]$.
+- Each section is placed in world space via an instanced world offset buffer:
+  ```rust
+  #[repr(C)]
+  #[derive(Copy, Clone, Debug, Pod, Zeroable)]
+  pub struct SectionInstance {
+      pub world_offset: [f32; 3], // (chunk_x * 16, section_base_y, chunk_z * 16)
+      pub _pad: u32,
+  }
+  ```
+  bound at `wgpu::VertexStepMode::Instance`.
+- World coordinate in vertex shader:
+  $$\vec{p}_{\text{world}} = \vec{\text{offset}}_{\text{world}} + \begin{pmatrix} \text{local\_x} \\ \text{local\_y} \\ \text{local\_z} \end{pmatrix}$$
+  $$\vec{p}_{\text{clip}} = \mathbf{M}_{\text{view\_proj}} \cdot \begin{pmatrix} \vec{p}_{\text{world}} \\ 1.0 \end{pmatrix}$$
+
+### 4. WGSL Bit-Exact Unpack & CPU Reference Debug Harness
+- **Shader Vertex Layout**:
+  ```wgsl
+  struct VertexInput {
+      @location(0) word0: u32,
+      @location(1) word1: u32,
+      @location(2) world_offset: vec3<f32>,
+  };
+  ```
+- **Bit-Exact WGSL Extraction**:
+  - `local_x = f32(in.word0 & 0x1Fu)`
+  - `local_y = f32((in.word0 >> 5u) & 0x1Fu)`
+  - `local_z = f32((in.word0 >> 10u) & 0x1Fu)`
+  - `normal_id = (in.word0 >> 15u) & 0x07u`
+  - `tint_mode = (in.word0 >> 18u) & 0x03u`
+  - `uv_rot = (in.word0 >> 20u) & 0x03u`
+  - `block_light = f32(in.word1 & 0x0Fu)`
+  - `sky_light = f32((in.word1 >> 4u) & 0x0Fu)`
+  - `ao = f32((in.word1 >> 8u) & 0x03u)`
+  - `base_layer = (in.word1 >> 10u) & 0x07FFu`
+  - `dry_foliage = ((in.word1 >> 21u) & 0x01u) != 0u`
+- **CPU Reference Mirror (`UnpackedVoxelVertex`)**:
+  A CPU struct `UnpackedVoxelVertex::from_packed(PackedVoxelVertex)` mirrors the shader unpack bit-for-bit.
+  A headless shader unpack golden test asserts 100% numerical identity before any visual render passes are evaluated.
+
+### 5. Lighting Model, Brightness Curve, & Directional Shading
+- **Vanilla Brightness Curve** — VERIFIED (review 2026-10-22, jar bytecode of
+  `net.minecraft.client.renderer.Lightmap.getBrightness(DimensionType, int)`,
+  release jar):
+  $$f(L) = \frac{L}{4.0 - 3.0 \cdot L}, \quad L = \text{lit}/15.0 \in [0.0, 1.0]$$
+  followed by `Mth.lerp(dimensionType.ambientLight(), f(L), 1.0f)`; the overworld
+  `ambientLight()` is 0, so v1 uses $f(L)$ exactly. The scalar v1 path below
+  stands in for the client's per-frame lightmap **texture** build
+  (`Lightmap.render`, UBO-driven); the exact later path replays that ramp or the
+  engine's subtractive pin.
+- **Effective Light Level (`lit`)** — [APPROX-RENDERING-03] client-ramp scalar:
+  $$\text{lit} = \max(\text{block\_light}, \text{sky\_light} \cdot \text{day\_factor})$$
+  with `day_factor` a frame uniform scalar $\in [0.0, 1.0]$. This is a CLIENT
+  APPROXIMATION of the per-frame lightmap ramp, NOT an engine-matching formula:
+  the standing Step 2.5 pin holds (`LevelLightEngine.java:142-146` —
+  `max(blockLight, skyLight − skyDampen)`, subtractive); when ambient state
+  lands, the subtractive uniform replaces the multiply.
+- **Directional Face Shading** — VERIFIED (review 2026-10-22, jar bytecode of
+  `net.minecraft.world.level.CardinalLighting`): the 26.3 constant class is
+  `CardinalLighting.byFace(Direction)` (the old `getDirectionalBrightness`
+  label is retired); record
+  `DEFAULT = { down=0.5, up=1.0, north=0.8, south=0.8, west=0.6, east=0.6 }`
+  read from the `<clinit>` constructor arguments (a `NETHER` variant
+  `{0.9,0.9,0.8,0.8,0.6,0.6}` also exists — out of v1 scope). Our `normal_id`
+  mapping (NORTH = −Z, EAST = +X per §6.6): `+Y` top (`normal_id == 0` = UP):
+  `1.0`; `-Y` bottom (`normal_id == 1` = DOWN): `0.5`; `±Z` (south
+  `normal_id == 2`, north `normal_id == 3`): `0.8`; `±X` (east
+  `normal_id == 4`, west `normal_id == 5`): `0.6`.
+  `quad.materialInfo().shadeDirectionOverride` exists downstream
+  (BlockModelLighter.java:282-283) — not v1.
+- **Ambient Occlusion Curve** — [APPROX-RENDERING-05] shader-side realization of
+  the pinned Step 3 integer AO approximation (NOT a vanilla constant):
+  $$\text{ao\_factor} = 0.4 + 0.2 \cdot ao \quad (\implies [0.4, 0.6, 0.8, 1.0] \text{ for } ao \in 0..3)$$
+- **Combined Light Value**:
+  $$\text{light\_mult} = \text{FACE\_SHADE}[\text{normal\_id}] \cdot \text{ao\_factor} \cdot (0.05 + 0.95 \cdot f(L))$$
+  The `0.05` ambient floor is [APPROX-RENDERING-04] — invented for v1
+  readability (vanilla clamps to $f(0) = 0$); revisit when the subtractive
+  `skyDampen` uniform lands.
+
+### 6. Camera, Coordinate Convention, & Backface Culling
+- Right-handed coordinate system: $+X$ East, $+Y$ Up, $-Z$ North / forward (in Minecraft world coordinates: $+Z$ is South, $-Z$ is North).
+- Camera view matrix: `glam::Mat4::look_at_rh(eye, center, vec3(0.0, 1.0, 0.0))`.
+- Camera projection: `glam::Mat4::perspective_rh(fov_y, aspect, z_near, z_far)` with $[0, 1]$ depth.
+- **Pass 1 (Opaque & Cutout Pipeline)**:
+  - `front_face: wgpu::FrontFace::Ccw`
+  - `cull_mode: Some(wgpu::Face::Back)` (consistent with the 24/24 CCW winding normal goldens locked in Step 3)
+  - `depth_write_enabled: true`
+  - `depth_compare: wgpu::CompareFunction::LessEqual`
+- **Pass 2 (Translucent Pipeline)**:
+  - `front_face: wgpu::FrontFace::Ccw`
+  - `cull_mode: None` (two-sided rendering: water surfaces, stained glass, and ice must be visible from both above and below/underwater)
+  - `depth_write_enabled: false`
+  - `depth_compare: wgpu::CompareFunction::LessEqual`
+  - `blend: Some(wgpu::BlendState::ALPHA_BLENDING)`
+- **Depth Attachment**:
+  - Shared depth buffer format: `wgpu::TextureFormat::Depth24Plus`, cleared to `1.0` (all passes).
+- **Vanilla Depth Direction — VERIFIED (review 2026-10-22, release-jar
+  `DepthStencilState` + `RenderPipelines` decompiles, javap `<clinit>`)**:
+  vanilla 26.3 renders terrain REVERSED-Z: `DepthStencilState.DEFAULT` =
+  `(CompareOp.GREATER_THAN_OR_EQUAL, writeDepth=true)` and the terrain snippet
+  chain (TERRAIN → SOLID/CUTOUT/TRANSLUCENT_TERRAIN) inherits it. Our
+  conventional mapping (clear `1.0`, `LessEqual`) is the same inclusive
+  equal-depth test under normal orientation and is labeled
+  [APPROX-RENDERING-08] (a depth-convention deviation, not an occlusion-semantics one). `LessEqual` is REQUIRED — the plain `Less`
+  written into this section by 7710121 was an unreviewed regression against
+  §2; never alter pipeline semantics without a jar citation.
+
+### 7. Tints & Dynamic Colormaps
+- Dynamic tinting evaluates in fragment shader:
+  - `dry_foliage` flag (Word 1 bit 21 == 1) routes to dry foliage tint (`#929786` for `pale_oak_leaves`).
+  - Otherwise `tint_mode`:
+    - `0` (`TINT_NONE`): `vec3(1.0, 1.0, 1.0)`
+    - `1` (`TINT_GRASS`): Biome grass tint, defaulting to Plains `#79C05A` (`vec3(0.4745, 0.7529, 0.3529)`) [APPROX-RENDERING-07]
+    - `2` (`TINT_FOLIAGE`): Biome foliage tint, defaulting to Plains `#59C93C` (`vec3(0.3490, 0.7882, 0.2353)`) [APPROX-RENDERING-07]
+    - `3` (`TINT_WATER`): Biome water tint, defaulting to Plains `#3F76E4` (`vec3(0.2471, 0.4627, 0.8941)`) [APPROX-RENDERING-07]
+  - **Tint Color Space — REVIEW FINDING (2026-10-22), REQUIREMENT R8**: runtime
+  tints multiply LINEAR sampled values (hardware decodes `Rgba8UnormSrgb`
+  textures), so every `evaluate_tint` constant MUST be the LINEARIZED value
+  `srgb_to_linear(#hex)` (the same piecewise IEC transform as the bake's
+  `apply_linear_tint`), NOT the encoded sRGB float. WGSL currently carries the
+  encoded floats — bug, fix pending R8. Contract table (f32-nearest):
+    - `TINT_GRASS` (1) `#79C05A` → `(0.1912017, 0.5271151, 0.1022417)`
+    - `TINT_FOLIAGE` (2) `#59C93C` → `(0.0998987, 0.5840784, 0.0451862)`
+    - `TINT_WATER` (3) `#3F76E4` → `(0.0497066, 0.1811642, 0.7758222)`
+    - `TINT_DRY_FOLIAGE` (4) `#929786` → `(0.2874408, 0.3094689, 0.2383976)`
+  Golden test: render `grass_block_top` (`tint_mode = 1`) at full light (lit=15,
+  ao=3, UP face → multiplier 1.0) and byte-compare a texel against the CPU
+  reference `apply_linear_tint(grass_block_top texel, 0x79C05A)` — runtime and
+  bake must agree exactly.
+- **Engine-Added Bake Layers (reserved range, pinned)**: bake-appended engine
+  layers `1840` = birch_leaves_tinted, `1841` = spruce_leaves_tinted,
+  `1842` = lily_pad_tinted, `1843` = grass_block_side_overlay_composite
+  ([APPROX-RENDERING-09]); `total_layers = 1844` (< 2048 device cap). The
+  machine record is `texture_manifest.json` (`total_layers`,
+  `pre_tinted_layers`) — SPECS pins the reserved id range, not snapshot byte
+  sizes. Mip binaries 1..4 remain uploaded but unsampled until [APPROX-RENDERING-06]
+  is lifted (LOD0 pinned for v1).
+- **Colormap Texture Assets**:
+  - Extracted offline from release jar into `assets/textures/colormap/*.png`:
+    - `grass.png` (256x256 RGB)
+    - `foliage.png` (256x256 RGB)
+    - `dry_foliage.png` (256x256 RGB)
+    - Byte-identity VERIFIED (review 2026-10-22): all three are byte-equal to the
+      release jar's own `assets/minecraft/textures/colormap/*.png`; the `snap.7z`
+      staging path is provenance-neutral for these assets.
+- **Grass Block Side Overlay — REVIEW FINDING (2026-10-22), REQUIREMENT R5**:
+  vanilla composites a coplanar tinted `grass_block_side_overlay` rim over the
+  dirt side texture, tinted with the SAME grass tint as the top face. The
+  current bake references plain `grass_block_side` (dirt) for grass_block's
+  four side normals — the rim is silently missing. Required offline fix:
+  composite the overlay into a new bake-added layer using the
+  [APPROX-RENDERING-07] Plains grass tint constant, remap grass_block's
+  side-face texture references, and set those faces' tint mode to 0 (the rim's
+  tint is frozen inside the composite; runtime re-tinting would recolor the
+  dirt pixels too). Labeled [APPROX-RENDERING-09]: the rim stays frozen at
+  Plains until per-voxel biome tinting lands, whereupon the composite resolves
+  to a runtime decal quad. The composite bake must remain registry-driven —
+  no hand-typed tables. Verify via a headless grass-block side golden.
+- **Snowy Grass Top Tint — REQUIREMENT R5b RETRACTED (decompile-verified,
+  2026-10-22)**: the earlier claim ("vanilla applies the grass tint at BLOCK
+  level regardless of snowy state") was WRONG. 26.3 ground truth: tint
+  APPLICATION is per-quad via the model's `tintindex` —
+  `ModelBlockRenderer.putQuadWithTint` (ModelBlockRenderer.java:203-219) tints
+  a quad iff `quad.materialInfo().tintIndex() != -1`; the block-level
+  registration (`BlockColors.createDefault()` →
+  `BlockTintSources.grassBlock()` → `$4`: `GrassColor.getDefaultColor()`) only
+  supplies the resolver CONSULTED by tinted quads. The snowy model chain
+  (`grass_block_snow.json` → `cube_bottom_top` → `cube`) declares NO tintindex
+  on any face, while default `grass_block.json` explicitly does (`up` +
+  overlay faces, `"tintindex": 0`). Since `grass_block_top.png` is per-pixel
+  grayscale (R=G=B), vanilla renders the snowy top UN-TINTED gray by design.
+  Engine consequence: state 666 stays `UP 630 / tint 0` — already
+  vanilla-exact from R5; NO registry change; R5b closed as no-op.
+
+### 8. Fragment Texture Contract, UV Mapping, & Chunk Partitioning
+- **Registry-Driven Chunk Layer Partitioning**:
+  `BlockStateEntry::render_layer(&self) -> u8` (row byte 30 / `pad[1]`) determines chunk mesh grouping:
+  - `LAYER_SOLID = 0`: Standard opaque cubes (stone, dirt, planks, etc.) and fluids (lava). Rendered in Pass 1 without alpha discard.
+  - `LAYER_CUTOUT_MIPPED = 1`: Leaves blocks. Rendered in Pass 1 with [APPROX-RENDERING-02] discard.
+  - `LAYER_CUTOUT = 2`: 1-bit cutout blocks (copper grates, clear glass, doors, trapdoors, saplings, rails). Rendered in Pass 1 with [APPROX-RENDERING-02] discard.
+  - `LAYER_TRANSLUCENT = 3`: Semitransparent blocks (stained glass, stained glass panes, ice, frosted ice, tinted glass, slime, honey, water). Rendered in Pass 2 with alpha blending.
+- **Pass Streams & Fluid Meshing (R7, review-verified 2026-10-22)**:
+  `MeshResult` holds exactly `opaque` (layers 0/1/2) and `translucent` (layer 3)
+  streams — `combined()` is a computed view, never a stored field.
+  `FaceMergeKey.pass_bucket` (key field) forbids cross-bucket greedy merges.
+  `MESH_FLUID` faces mesh through the SAME `should_cull_face` gate and
+  registry-driven AO path as cubes and route ONLY by pass bucket (derived from
+  `render_layer`), never by mesh_type.
+- **CameraUniform — Day/Night Dampen & Tick (Step 5A pin)**:
+  16-byte aligned, 80 B total: `view_proj` [[f32;4];4] (64 B), `sky_dampen`
+  u32 (0..=15, default 0 — all pre-5A behavior unchanged), `tick_count` u32
+  (increments at 20 Hz / 50 ms), pad [u32; 2]. Render-side dampening mirrors
+  the vanilla `getRawBrightness` invariant: `eff_sky = max(0, sky_light −
+  sky_dampen)`, `lit = max(block_light, eff_sky)`, then the existing brightness
+  curve and 0.05 floor. sky_dampen / tick_count changes MUST NOT re-mesh.
+  [APPROX-RENDERING-03] day multiply stays neutral (1.0) — dampen is the sole
+  day-night control in v1.
+- **Animated Texture Frames (Step 5A pin; bake contract already on disk)**:
+  `assets/textures/animation_timeline.bin` = 8,548 u32 frame ids (34,192 B,
+  byte-size verified == `timeline_total_u32` × 4); per-texture
+  `timeline_offset` / `timeline_len` in `texture_manifest.json` sum exactly to
+  it. Runtime frame resolution is SHADER-side from `tick_count`:
+  `layer_id = timeline[offset + (tick_count / frametime) % len]` via a
+  bake-emitted per-layer meta table `animation_meta.bin` — 1844 rows ×
+  [u32 offset, u32 len, u32 frametime]. The bake must be extended once:
+  manifest currently lacks per-texture `frametime` (extract it from the
+  extracted `block_mcmetas/*.png.mcmeta` at bake time — frame sequences and
+  offsets already exist; no image re-work). Frame swaps cause NO re-meshing and
+  no extra vertex data. Textures flagged `interpolate: true` (23 in the
+  current manifest) freeze at `timeline[offset]` — interpolated blending is
+  deferred as [APPROX-RENDERING-10].
+- **Windowed Surface (Step 5A pin)**: `GpuContext::new_windowed` selects an
+  sRGB surface format (assert `format.is_srgb()`), parameterizes
+  `TerrainPipelines::new(device, color_format, depth_format)`; `new_headless`
+  inputs stay untouched (tests keep `Rgba8UnormSrgb`). The windowed path MUST
+  reuse the headless limit discipline (2048 texture-array layers in
+  `required_limits` + adapter validation). Startup prints adapter name,
+  backend, and selected surface format.
+- **Vanilla Layer Dispatch — VERIFIED (review 2026-10-22, `ChunkSectionLayer.java` release-jar decompile)**:
+  vanilla 26.3 has THREE section layers — `SOLID` / `CUTOUT` / `TRANSLUCENT`.
+  `ChunkSectionLayer.byTransparency(Transparency)` maps the per-quad material
+  aggregate: `hasTranslucent → TRANSLUCENT`, `hasTransparent → CUTOUT`, else
+  `SOLID`; the old fourth `cutout_mipped` section member is FOLDED into
+  `CUTOUT`. Our 4-value byte is an engine-side refinement preserving
+  leaves-mip semantics for a future mip-aware sampler; its pass behavior equals
+  `LAYER_CUTOUT`'s. The offline per-block classification was validated against
+  the per-quad Transparency truth for every CUBE/fluid row (review delta
+  script: 16 CUBE deltas — 14 leaves `cutout_mipped` vs `cutout`, the
+  test-only block, and grass_block's overlay below); VALIDATION IS COMPLETE
+  FOR V1. Known undershoot: blocks whose registration properties live in
+  helper classes rather than inline (regex-visible) — `torch` is currently
+  SOLID where vanilla is CUTOUT. Before complex-mesh support consumes layer
+  bytes, fix the classification or flag every such block via the
+  `render_layers_breakdown` report (reviewable listings).
+- **UV Axis Mapping — VERIFIED (review 2026-10-22, release-jar `FaceBakery.defaultFaceUV(from, to, Direction)` decompile)**:
+  Orientation anchor is vanilla `defaultFaceUV`, normalized below (texture-space $V$ grows downward); corner enumeration stays with `mesher.rs`
+  canonical corner order:
+  - `FACE_UP` (+Y, `normal_id = 0`): $U = x, V = z$ — vanilla case UP: `(x, z)`
+  - `FACE_DOWN` (-Y, `normal_id = 1`): $U = x, V = 1.0 - z$ — vanilla case DOWN: `(x, 16.0F - z)`; MIRRORED along $z$ versus UP (the `V = z` value
+    written by 7710121 was wrong and is retired here)
+  - `FACE_SOUTH` (+Z, `normal_id = 2`): $U = x, V = 1.0 - y$ — case SOUTH: `(x, 16.0F - y)`
+  - `FACE_NORTH` (-Z, `normal_id = 3`): $U = 1.0 - x, V = 1.0 - y$ — case NORTH: `(16.0F - x, 16.0F - y)`
+  - `FACE_EAST` (+X, `normal_id = 4`): $U = 1.0 - z, V = 1.0 - y$ — case EAST: `(16.0F - z, 16.0F - y)`
+  - `FACE_WEST` (-X, `normal_id = 5`): $U = z, V = 1.0 - y$ — case WEST: `(z, 16.0F - y)`
+- **UV Rotation (`uv_rot`)**:
+  Applied after face axis mapping in 90° increments:
+  - `0`: $(u, v)$
+  - `1`: $(v, 1.0 - u)$
+  - `2`: $(1.0 - u, 1.0 - v)$
+  - `3`: $(1.0 - v, u)$
+- **Greedy Quad Tiling**:
+  Merged quads span $[u_0..u_1] \times [v_0..v_1]$ in local block coordinates. In the fragment shader:
+  $$U_{\text{tile}} = \text{fract}(U), \quad V_{\text{tile}} = \text{fract}(V)$$
+- **Explicit LOD0 Sampling [APPROX-RENDERING-06]**:
+  Textures sample at LOD 0 (`textureSampleLevel(t_diffuse, s_diffuse, uv, layer, 0.0)`) until anisotropic filtering and derivative MIP selection are implemented for 2D array textures.
+- **Color & Texture Formats**:
+  - `wgpu::TextureFormat::Rgba8UnormSrgb` for both Texture2DArray and Framebuffer / Headless Target.
+  - All shader lighting math executes in linear space; hardware sRGB conversion is utilized for decode and write.
+- **Device Limits & Headless Testing**:
+  - Adapter initialization requires `max_texture_array_layers >= 2048`.
+  - Adapter creation and limit checks have a dedicated unit-testable seam that runs headless without display or window requirements.
+
