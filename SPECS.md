@@ -253,6 +253,16 @@ Step 2.5 invariants for the light field (release-jar mechanics):
   occlusion faces close the boundary — engages only `useShapeForLightOcclusion`
   blocks (stairs/panes; our complex-skip set) — carried to the Step 2.5 boundary
   propagator when those mesh.
+- Section voxel index: `(y << 8) | (z << 4) | x` (x fastest, y slowest) — pinned
+  2026-10-22 with the light-field module; mesher and world-gen consume the same order.
+- World cover: 24 sections ⇒ Y ∈ [−64, 320); engine constants `MIN_Y = -64`,
+  `SECTION_COUNT = 24`. (Vanilla pads `getLightSectionCount() = sections + 2`
+  — LevelLightEngine.java:153-155; we skip the padding in v1 but must emulate its
+  semantics: light queries at y ≥ MAX_Y yield **sky 15 / block 0** (the vanilla
+  padding section above the top is full sky — the mesher's y=319 top faces read
+  `sky=15`), y < MIN_Y yields 0/0.)
+- State ids: BFS/mesher lookups use raw registry state ids from the bin (see
+  approximation 5); no engine-side offset, and lookups by block name in tests.
 
 Known v1 approximations (Step 3/4 refinement list):
 1. `uv_rot` uses only the model face's own `rotation` field; blockstate twist with
@@ -263,9 +273,13 @@ Known v1 approximations (Step 3/4 refinement list):
    expand when block IDs land).
 4. `farmland` (15/16-height top prism) and other near-full prisms classify Complex and
    are mesher-skipped until Step 3 defines near-full handling.
-5. `air` is not stored: an unregistered block ID must read as the all-zero row
-   (state id `0` = air by convention; engine maps block→`state_start + 1`-style offsets
-   when IDs are introduced).
+5. `air`/`cave_air`/`void_air` **are** registered rows (air family bakes `MESH_EMPTY`,
+   emission 0 / filter 0 / opaque 0 — `assets/blockstates/air.json` is among the 1,288
+   blockstates). Engine voxels carry raw registry state ids — **no sentinel/offset**:
+   state id `0` is `acacia_button`'s first row, which is *incidentally* all-zero for
+   light purposes (an id-0 zero-assert is a vacuous test — always look rows up by
+   block name). Unregistered world-voxel ids resolve to `air`'s state id at
+   world-import time (Step 5).
 6. Complex/Empty blocks stay single-row: LIT-conditioned emitters there (torches,
    campfires, trial/vault/spawner, candle) collapse to always-lit values pending
    light-relevant state expansion ( extractor records carry the predicates; see
@@ -273,6 +287,9 @@ Known v1 approximations (Step 3/4 refinement list):
    representative value with `decl` provenance in the oracle table.
 7. Waveforms/variants like respawn_anchor/map from state maps; an unknown
    enumerated value falls back to 0, not a crash.
+8. Light reload on edit recomputes the whole chunk column (24 sections) with
+   cross-chunk boundary seeding from neighbour light; vanilla's incremental
+   add/remove two-queue BFS is deferred until profiling demands it.
 
 ```mermaid
 flowchart TD
