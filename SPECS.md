@@ -458,6 +458,7 @@ flowchart TD
 - **V1 Approximations**:
   - `[APPROX-RENDERING-01]` **Translucent Sorting Skip**: Translucent quads and sections are rendered without per-quad depth sorting.
   - `[APPROX-RENDERING-02]` **Cutout Alpha Threshold**: Fixed at `alpha < 0.1` in fragment shader.
+  - `[APPROX-RENDERING-03..05]`: lighting approximations pinned in §6.5 (day_factor scalar ramp, ambient floor, AO curve).
 
 ### 3. Per-Section World Placement (`SectionInstance`)
 - `PackedVoxelVertex` coordinates are strictly 5-bit section-local: $x, y, z \in [0, 16]$.
@@ -501,21 +502,43 @@ flowchart TD
   A headless shader unpack golden test asserts 100% numerical identity before any visual render passes are evaluated.
 
 ### 5. Lighting Model, Brightness Curve, & Directional Shading
-- **Vanilla Brightness Curve**:
-  For normalized light $L = \text{lit} / 15.0 \in [0.0, 1.0]$:
-  $$f(L) = \frac{L}{4.0 - 3.0 \cdot L}$$
-- **Effective Light Level (`lit`)**:
+- **Vanilla Brightness Curve** — VERIFIED (review 2026-10-22, jar bytecode of
+  `net.minecraft.client.renderer.Lightmap.getBrightness(DimensionType, int)`,
+  release jar):
+  $$f(L) = \frac{L}{4.0 - 3.0 \cdot L}, \quad L = \text{lit}/15.0 \in [0.0, 1.0]$$
+  followed by `Mth.lerp(dimensionType.ambientLight(), f(L), 1.0f)`; the overworld
+  `ambientLight()` is 0, so v1 uses $f(L)$ exactly. The scalar v1 path below
+  stands in for the client's per-frame lightmap **texture** build
+  (`Lightmap.render`, UBO-driven); the exact later path replays that ramp or the
+  engine's subtractive pin.
+- **Effective Light Level (`lit`)** — [APPROX-RENDERING-03] client-ramp scalar:
   $$\text{lit} = \max(\text{block\_light}, \text{sky\_light} \cdot \text{day\_factor})$$
-  where `day_factor` is a frame uniform scalar $\in [0.0, 1.0]$ matching `LevelLightEngine` (`max(block, sky - dampen)`).
-- **Directional Face Shading (Vanilla `getDirectionalBrightness`)**:
-  - `+Y` (top, `normal_id == 0`): `1.0`
-  - `-Y` (bottom, `normal_id == 1`): `0.5`
-  - `±Z` (north/south, `normal_id == 2, 3`): `0.8`
-  - `±X` (east/west, `normal_id == 4, 5`): `0.6`
-- **Ambient Occlusion Curve**:
+  with `day_factor` a frame uniform scalar $\in [0.0, 1.0]$. This is a CLIENT
+  APPROXIMATION of the per-frame lightmap ramp, NOT an engine-matching formula:
+  the standing Step 2.5 pin holds (`LevelLightEngine.java:142-146` —
+  `max(blockLight, skyLight − skyDampen)`, subtractive); when ambient state
+  lands, the subtractive uniform replaces the multiply.
+- **Directional Face Shading** — VERIFIED (review 2026-10-22, jar bytecode of
+  `net.minecraft.world.level.CardinalLighting`): the 26.3 constant class is
+  `CardinalLighting.byFace(Direction)` (the old `getDirectionalBrightness`
+  label is retired); record
+  `DEFAULT = { down=0.5, up=1.0, north=0.8, south=0.8, west=0.6, east=0.6 }`
+  read from the `<clinit>` constructor arguments (a `NETHER` variant
+  `{0.9,0.9,0.8,0.8,0.6,0.6}` also exists — out of v1 scope). Our `normal_id`
+  mapping (NORTH = −Z, EAST = +X per §6.6): `+Y` top (`normal_id == 0` = UP):
+  `1.0`; `-Y` bottom (`normal_id == 1` = DOWN): `0.5`; `±Z` (south
+  `normal_id == 2`, north `normal_id == 3`): `0.8`; `±X` (east
+  `normal_id == 4`, west `normal_id == 5`): `0.6`.
+  `quad.materialInfo().shadeDirectionOverride` exists downstream
+  (BlockModelLighter.java:282-283) — not v1.
+- **Ambient Occlusion Curve** — [APPROX-RENDERING-05] shader-side realization of
+  the pinned Step 3 integer AO approximation (NOT a vanilla constant):
   $$\text{ao\_factor} = 0.4 + 0.2 \cdot ao \quad (\implies [0.4, 0.6, 0.8, 1.0] \text{ for } ao \in 0..3)$$
 - **Combined Light Value**:
   $$\text{light\_mult} = \text{FACE\_SHADE}[\text{normal\_id}] \cdot \text{ao\_factor} \cdot (0.05 + 0.95 \cdot f(L))$$
+  The `0.05` ambient floor is [APPROX-RENDERING-04] — invented for v1
+  readability (vanilla clamps to $f(0) = 0$); revisit when the subtractive
+  `skyDampen` uniform lands.
 
 ### 6. Camera, Coordinate Convention, & Backface Culling
 - Right-handed coordinate system: $+X$ East, $+Y$ Up, $-Z$ North / forward (in Minecraft world coordinates: $+Z$ is South, $-Z$ is North).
