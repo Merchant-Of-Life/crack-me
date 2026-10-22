@@ -1663,5 +1663,65 @@ fn test_animation_frame_golden() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// 12. F8 Registry-Wide Golden: Face Layer Invariant (SPECS a0d5118)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_f8_registry_wide_face_layers_valid_and_not_animated_non_base() {
+    let assets = assets_dir();
+    let reg = BlockRegistry::from_file(assets.join("registry/block_registry.bin"))
+        .expect("block_registry.bin");
+
+    let manifest_path = assets.join("textures/texture_manifest.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path).expect("texture_manifest.json");
+    let manifest: serde_json::Value = serde_json::from_str(&manifest_text).expect("parse json");
+
+    let total_layers = manifest["total_layers"].as_u64().expect("total_layers") as u16;
+
+    let mut valid_bases = std::collections::HashSet::new();
+    let mut forbidden_non_base = std::collections::HashSet::new();
+
+    let textures = manifest["textures"]
+        .as_object()
+        .expect("textures object in manifest");
+
+    for (_name, tex) in textures {
+        let base = tex["base_layer"].as_u64().expect("base_layer") as u16;
+        let animated = tex["animated"].as_bool().unwrap_or(false);
+        let frame_count = tex["frame_count"].as_u64().unwrap_or(1) as u16;
+
+        valid_bases.insert(base);
+        if animated && frame_count > 1 {
+            for k in 1..frame_count {
+                forbidden_non_base.insert(base + k);
+            }
+        }
+    }
+
+    assert!(reg.state_count() > 0, "registry must contain states");
+
+    for s_idx in 0..reg.state_count() {
+        let state = reg.get_state(s_idx as u32).expect("state entry");
+        for (f_idx, face) in state.faces.iter().enumerate() {
+            let layer = face.base_layer;
+            assert!(
+                layer < total_layers,
+                "State {} face {} references out-of-bounds layer {} (total_layers={})",
+                s_idx, f_idx, layer, total_layers
+            );
+            assert!(
+                valid_bases.contains(&layer),
+                "State {} face {} layer {} is not a declared base layer in manifest['textures']",
+                s_idx, f_idx, layer
+            );
+            assert!(
+                !forbidden_non_base.contains(&layer),
+                "State {} face {} references animated non-base layer {} (base+k, k>=1 forbidden by SPECS a0d5118)",
+                s_idx, f_idx, layer
+            );
+        }
+    }
+}
+
 
 
