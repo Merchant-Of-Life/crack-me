@@ -18,8 +18,8 @@ pub use mesher::{
 pub use registry::{
     BlockIndexEntry, BlockRegistry, BlockStateEntry, FaceInfo, RegistryError, CULL_LAVA,
     CULL_LEAVES, CULL_OPAQUE, CULL_TRANSPARENT_START, CULL_WATER, FACE_DOWN, FACE_EAST,
-    FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST, MESH_COMPLEX, MESH_CROSS, MESH_CUBE, MESH_EMPTY,
-    MESH_FLUID,
+    FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST, LAYER_CUTOUT, LAYER_CUTOUT_MIPPED, LAYER_SOLID,
+    LAYER_TRANSLUCENT, MESH_COMPLEX, MESH_CROSS, MESH_CUBE, MESH_EMPTY, MESH_FLUID,
 };
 
 /// Exactly 64-bit packed voxel vertex according to SPECS.md
@@ -1157,5 +1157,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_render_layers_golden() {
+        let reg = load_oracle_registry();
+
+        // 1. stone == LAYER_SOLID (0)
+        let stone = reg.get_block("stone").expect("stone in registry");
+        let stone_state = reg.get_state(stone.state_start).unwrap();
+        assert_eq!(stone_state.render_layer(), LAYER_SOLID, "stone must be LAYER_SOLID");
+
+        // 2. copper_grate == LAYER_CUTOUT (2)
+        let copper_grate = reg.get_block("copper_grate").expect("copper_grate in registry");
+        let copper_grate_state = reg.get_state(copper_grate.state_start).unwrap();
+        assert_eq!(copper_grate_state.render_layer(), LAYER_CUTOUT, "copper_grate must be LAYER_CUTOUT");
+
+        // Weathered / waxed copper grates parity
+        for prefix in ["exposed_", "weathered_", "oxidized_", "waxed_", "waxed_exposed_", "waxed_weathered_", "waxed_oxidized_"] {
+            let name = format!("{prefix}copper_grate");
+            let b = reg.get_block(&name).unwrap_or_else(|| panic!("{name} in registry"));
+            let s = reg.get_state(b.state_start).unwrap();
+            assert_eq!(s.render_layer(), LAYER_CUTOUT, "{name} must be LAYER_CUTOUT");
+        }
+
+        // 3. white_stained_glass == LAYER_TRANSLUCENT (3)
+        let white_stained_glass = reg.get_block("white_stained_glass").expect("white_stained_glass in registry");
+        let white_stained_glass_state = reg.get_state(white_stained_glass.state_start).unwrap();
+        assert_eq!(white_stained_glass_state.render_layer(), LAYER_TRANSLUCENT, "white_stained_glass must be LAYER_TRANSLUCENT");
+
+        // 4. oak_leaves == LAYER_CUTOUT_MIPPED (1)
+        let oak_leaves = reg.get_block("oak_leaves").expect("oak_leaves in registry");
+        let oak_leaves_state = reg.get_state(oak_leaves.state_start).unwrap();
+        assert_eq!(oak_leaves_state.render_layer(), LAYER_CUTOUT_MIPPED, "oak_leaves must be LAYER_CUTOUT_MIPPED");
+
+        // 5. pale_oak_leaves == LAYER_CUTOUT_MIPPED (1)
+        let pale_oak_leaves = reg.get_block("pale_oak_leaves").expect("pale_oak_leaves in registry");
+        let pale_oak_leaves_state = reg.get_state(pale_oak_leaves.state_start).unwrap();
+        assert_eq!(pale_oak_leaves_state.render_layer(), LAYER_CUTOUT_MIPPED, "pale_oak_leaves must be LAYER_CUTOUT_MIPPED");
     }
 }

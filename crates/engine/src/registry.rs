@@ -37,6 +37,11 @@ pub const CULL_WATER: u8 = 2;
 pub const CULL_LAVA: u8 = 3;
 pub const CULL_TRANSPARENT_START: u8 = 4;
 
+pub const LAYER_SOLID: u8 = 0;
+pub const LAYER_CUTOUT_MIPPED: u8 = 1;
+pub const LAYER_CUTOUT: u8 = 2;
+pub const LAYER_TRANSLUCENT: u8 = 3;
+
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct BlockStateEntry {
     pub faces: [FaceInfo; 6],
@@ -45,13 +50,18 @@ pub struct BlockStateEntry {
     pub is_solid: u8,
     pub light_emission: u8, // 0..15 block light emitted
     pub light_filter: u8,   // 0..15 light attenuation per voxel
-    pub pad: [u8; 3],       // pad[0] = cull_class
+    pub pad: [u8; 3],       // pad[0] = cull_class, pad[1] = render_layer
 }
 
 impl BlockStateEntry {
     #[inline(always)]
     pub fn cull_class(&self) -> u8 {
         self.pad[0]
+    }
+
+    #[inline(always)]
+    pub fn render_layer(&self) -> u8 {
+        self.pad[1]
     }
 }
 

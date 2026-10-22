@@ -51,6 +51,11 @@ pub const MESH_CROSS: u8 = 2;
 pub const MESH_FLUID: u8 = 3;
 pub const MESH_COMPLEX: u8 = 4;
 
+pub const LAYER_SOLID: u8 = 0;
+pub const LAYER_CUTOUT_MIPPED: u8 = 1;
+pub const LAYER_CUTOUT: u8 = 2;
+pub const LAYER_TRANSLUCENT: u8 = 3;
+
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct FaceInfo {
     pub base_layer: u16, // texture array layer 0..1842
@@ -448,6 +453,8 @@ struct RawBlockProps {
     pub skylight: BTreeSet<String>,
     #[serde(default)]
     pub cull_classes: BTreeMap<String, String>,
+    #[serde(default)]
+    pub render_layers: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -456,6 +463,7 @@ pub struct BlockProps {
     pub no_occlusion: BTreeSet<String>,
     pub skylight: BTreeSet<String>,
     pub cull_classes: BTreeMap<String, u8>,
+    pub render_layers: BTreeMap<String, u8>,
 }
 
 impl BlockProps {
@@ -489,16 +497,32 @@ impl BlockProps {
             cull_classes.insert(block, id);
         }
 
+        let mut render_layers = BTreeMap::new();
+        for (block, layer_name) in raw.render_layers {
+            let id = match layer_name.as_str() {
+                "cutout_mipped" => LAYER_CUTOUT_MIPPED,
+                "cutout" => LAYER_CUTOUT,
+                "translucent" => LAYER_TRANSLUCENT,
+                _ => LAYER_SOLID,
+            };
+            render_layers.insert(block, id);
+        }
+
         Ok(Self {
             emission: raw.emission,
             no_occlusion: raw.no_occlusion,
             skylight: raw.skylight,
             cull_classes,
+            render_layers,
         })
     }
 
     pub fn cull_class(&self, block: &str) -> u8 {
         self.cull_classes.get(block).copied().unwrap_or(0)
+    }
+
+    pub fn render_layer(&self, block: &str) -> u8 {
+        self.render_layers.get(block).copied().unwrap_or(LAYER_SOLID)
     }
 
     fn is_fluid(block: &str) -> bool {
@@ -769,6 +793,7 @@ pub fn bake(
                 entry.light_emission = props.emission_row(&name, &empty, false);
                 entry.light_filter = props.light_filter(&name, MESH_FLUID);
                 entry.pad[0] = props.cull_class(&name);
+                entry.pad[1] = props.render_layer(&name);
                 states.push(entry);
             } else if let Some(Value::Object(variants)) = bs.get("variants") {
                 // Expand property combinations for mesh-relevant states.
@@ -846,6 +871,7 @@ pub fn bake(
             entry.light_emission = props.emission_row(&name, &empty, true);
             entry.light_filter = props.light_filter(&name, mesh_type);
             entry.pad[0] = props.cull_class(&name);
+            entry.pad[1] = props.render_layer(&name);
             states.push(entry);
         }
 
@@ -1006,6 +1032,7 @@ fn cube_state_row(
     entry.light_emission = block_props.emission_row(block, vals, false);
     entry.light_filter = block_props.light_filter(block, mesh_type);
     entry.pad[0] = block_props.cull_class(block);
+    entry.pad[1] = block_props.render_layer(block);
 
     let tint = tint_decision(block);
     let tint_mode = match tint {

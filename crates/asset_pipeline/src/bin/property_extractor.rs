@@ -520,6 +520,7 @@ fn main() {
     let mut no_occlusion: BTreeSet<String> = BTreeSet::new();
     let mut skylight: BTreeSet<String> = BTreeSet::new();
     let mut cull_classes: BTreeMap<String, String> = BTreeMap::new();
+    let mut render_layers: BTreeMap<String, String> = BTreeMap::new();
     let mut diagnostics: Vec<String> = vec![];
 
     for (decl_line, raw) in reg_bodies(&src) {
@@ -589,6 +590,35 @@ fn main() {
             }
         }
 
+        // Render layer harvest:
+        // - leaves -> cutout_mipped (LAYER_CUTOUT_MIPPED = 1)
+        // - translucent (stained glass, stained glass panes, ice, frosted ice, tinted glass, slime, honey, water) -> translucent (LAYER_TRANSLUCENT = 3)
+        // - cutout (copper grates, glass, glass panes, doors, trapdoors, other noOcclusion) -> cutout (LAYER_CUTOUT = 2)
+        // - default -> solid (LAYER_SOLID = 0)
+        let is_translucent = is_water
+            || base == "bubble_column"
+            || body.contains("StainedGlassBlock")
+            || body.contains("StainedGlassPaneBlock")
+            || body.contains("IceBlock")
+            || body.contains("FrostedIceBlock")
+            || body.contains("TintedGlassBlock")
+            || body.contains("SlimeBlock")
+            || body.contains("HoneyBlock");
+
+        if is_leaves {
+            for id in &ids {
+                render_layers.insert(id.clone(), "cutout_mipped".to_string());
+            }
+        } else if is_translucent {
+            for id in &ids {
+                render_layers.insert(id.clone(), "translucent".to_string());
+            }
+        } else if body.contains(".noOcclusion()") {
+            for id in &ids {
+                render_layers.insert(id.clone(), "cutout".to_string());
+            }
+        }
+
         // provenance patching happens after legacy resolution below
         let _ = decl_line;
     }
@@ -613,6 +643,11 @@ fn main() {
                     if !cull_classes.contains_key(&origin) {
                         if let Some(cc) = cull_classes.get(&cur).cloned() {
                             cull_classes.insert(origin.clone(), cc);
+                        }
+                    }
+                    if !render_layers.contains_key(&origin) {
+                        if let Some(rl) = render_layers.get(&cur).cloned() {
+                            render_layers.insert(origin.clone(), rl);
                         }
                     }
                     match records.get(&cur) {
@@ -652,6 +687,7 @@ fn main() {
     let no_occlusion_n = no_occlusion.len();
     let skylight_n = skylight.len();
     let cull_classes_n = cull_classes.len();
+    let render_layers_n = render_layers.len();
 
     // Coverage report: scan registry blockstates from assets/blockstates
     let blockstates_dir = Path::new("assets/blockstates");
@@ -667,11 +703,26 @@ fn main() {
         }
     }
 
+    let mut count_cutout_mipped = 0usize;
+    let mut count_cutout = 0usize;
+    let mut count_translucent = 0usize;
+    let mut count_solid = 0usize;
+
+    for b in &registry_blocks {
+        match render_layers.get(b).map(|s| s.as_str()) {
+            Some("cutout_mipped") => count_cutout_mipped += 1,
+            Some("cutout") => count_cutout += 1,
+            Some("translucent") => count_translucent += 1,
+            _ => count_solid += 1,
+        }
+    }
+
     let mut covered_blocks: BTreeSet<String> = BTreeSet::new();
     covered_blocks.extend(emit_map.keys().cloned());
     covered_blocks.extend(no_occlusion.iter().cloned());
     covered_blocks.extend(skylight.iter().cloned());
     covered_blocks.extend(cull_classes.keys().cloned());
+    covered_blocks.extend(render_layers.keys().cloned());
 
     let unharvested_from_blocks_java: Vec<String> = registry_blocks
         .iter()
@@ -690,7 +741,15 @@ fn main() {
     println!("Blocks harvested from Blocks.java: {}", all_harvested_ids.len());
     println!("Blocks with non-default properties (covered by at least 1 map): {}", covered_blocks.len());
     println!("Blocks absent from Blocks.java harvest ({}): {:?}", unharvested_from_blocks_java.len(), unharvested_from_blocks_java);
-    println!("Blocks with standard opaque defaults (absent from all 4 maps): {}", absent_from_all_maps.len());
+    println!("Blocks with standard opaque defaults (absent from all 5 maps): {}", absent_from_all_maps.len());
+    println!(
+        "Render layers breakdown (of {} registry blocks): {} solid, {} cutout_mipped, {} cutout, {} translucent",
+        registry_blocks.len(),
+        count_solid,
+        count_cutout_mipped,
+        count_cutout,
+        count_translucent
+    );
     println!("=================================================================");
 
     let json = json!({
@@ -704,12 +763,19 @@ fn main() {
         "no_occlusion": no_occlusion.into_iter().collect::<Vec<_>>(),
         "skylight": skylight.into_iter().collect::<Vec<_>>(),
         "cull_classes": cull_classes,
+        "render_layers": render_layers,
         "coverage_report": {
             "total_registry_blocks": registry_blocks.len(),
             "harvested_blocks": all_harvested_ids.len(),
             "unharvested_blocks": unharvested_from_blocks_java,
             "blocks_with_custom_properties": covered_blocks.len(),
             "blocks_with_opaque_defaults": absent_from_all_maps.len(),
+            "render_layers_breakdown": {
+                "solid": count_solid,
+                "cutout_mipped": count_cutout_mipped,
+                "cutout": count_cutout,
+                "translucent": count_translucent,
+            },
         },
     });
 
@@ -720,11 +786,12 @@ fn main() {
         .expect("write block_properties.json");
 
     println!(
-        "block_properties.json: {} emission entries, {} noOcclusion, {} skylight, {} cull_classes; {} problems",
+        "block_properties.json: {} emission entries, {} noOcclusion, {} skylight, {} cull_classes, {} non-solid render_layers; {} problems",
         emit_map.len(),
         no_occlusion_n,
         skylight_n,
         cull_classes_n,
+        render_layers_n,
         diagnostics.len()
     );
     for w in &diagnostics {
