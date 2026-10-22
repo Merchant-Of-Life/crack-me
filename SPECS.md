@@ -309,13 +309,26 @@ Known v1 approximations (Step 3/4 refinement list):
      Always CULLS the face. The neighbor is a full solid block with `canOcclude == true` (stone, dirt, packed_ice, etc.).
   2. **Empty Neighbor (`neighbor.mesh_type == MESH_EMPTY`)**:
      NEVER culls the face. Air/empty blocks leave the face fully exposed.
-  3. **Adjacent Non-Opaque Blocks (`neighbor.is_opaque == 0`)**:
-     Evaluated strictly via `BlockStateEntry` fields without hardcoded ID tables:
-     - **Fluid-to-Fluid**: If `curr.mesh_type == MESH_FLUID && neighbor.mesh_type == MESH_FLUID`, cull shared internal face (water-to-water, lava-to-lava).
-     - **Leaves-to-Leaves (Fancy Graphics)**: If `curr.faces[face].tint_mode == 2` (foliage tint) and `neighbor.faces[opp].tint_mode == 2`, DO NOT CULL (`cutoutLeaves` Fancy mode draws internal leaf canopy faces).
-     - **Identical Transparent Cubes (Glass, Ice, Stained Glass)**:
-       If `curr.faces[face].base_layer == neighbor.faces[opp].base_layer` AND `curr.faces[face].tint_mode != 2`:
-       CULL shared interface. This handles glass-to-glass, same-color stained glass, ice-to-ice, and slime-to-slime using only texture layer identity. Dissimilar transparent blocks (e.g. glass against ice, red glass against blue glass) have distinct `base_layer` values and therefore do NOT cull.
+  3. **Adjacent Non-Opaque Blocks (`neighbor.is_opaque == 0`)**: decompile-verified
+     identity rule — `HalfTransparentBlock.skipRendering` culls iff
+     `neighborState.is(this)` (same block; `HalfTransparentBlock.java:13-16`), the
+     base rule likewise culls same-state; `LeavesBlock.java:49-51` overrides for
+     the leaves family. Block identity comes from the sorted-index reverse
+     state→block lookup (no id stored in rows; properties-bearing transparent
+     blocks keep per-state refinement as a note, not v1). The family list —
+     leaves incl. `pale_oak_leaves` (NOT foliage-tinted in BlockColors: the
+     `tint_mode == 2` proxy wrongly culled it; jar shows no dedicated
+     `PaleOakLeaves` class ⇒ plain `LeavesBlock` registration — confirm during
+     extraction) — is harvested by `property_extractor` from the registration
+     classes into `block_properties.json` and baked into row `pad[0]` as a
+     `cull_class` byte (row stays 32 B). Never hand-typed in engine or baker.
+     - **Same non-opaque block** (glass|glass, same stained-glass color,
+       ice|ice, slime|slime, same fluid water|water / lava|lava): CULL.
+     - **Different blocks** (water vs lava, glass vs ice, red vs blue stained
+       glass): RENDER both faces — the earlier `MESH_FLUID && MESH_FLUID` rule
+       over-culled water|lava boundaries.
+     - **Leaves family (`cutoutLeaves = true` default)**: never skip against any
+       LeavesBlock — render all internal canopy faces.
 
 ### 3. 8-Neighbor Halo Access & Scheduling Policy
 - **18×18×18 Padded Halo**: Meshing a 16³ section with 4-corner AO and vertex lighting requires sampling `x, y, z ∈ [-1, 16]`.
@@ -324,8 +337,13 @@ Known v1 approximations (Step 3/4 refinement list):
   - Vertical limits: `y >= 320` clamps to sky 15 / block 0 / air; `y < -64` clamps to sky 0 / block 0 / air.
 - **Neighborhood Input**:
   A `SectionHalo` buffer holding `voxels: [u16; 18 * 18 * 18]` (~11.6 KB) and `light: [u8; 18 * 18 * 18]` (~5.8 KB) extracted once per section before sweeping slices. Total footprint (~17.5 KB) resides fully in CPU L1 data cache, eliminating pointer chasing and chunk bounds branches in inner loops.
-- **Missing-Neighbor & Dirty Remesh Policy**:
-  - Missing neighbor columns at world borders/loading edges default to air with sky=15, block=0 (above ground) or sky=0, block=0 (underground).
+- **Missing-Neighbor & Dirty Remesh Policy** (reconciled 2026-10-22 — this
+  section replaces the fallback approach and restores the wait-for-8 contract):
+  - A section meshes ONLY when all 8 horizontal neighbor columns (voxels AND
+    light) are available; a missing neighbor queues a remesh for that section
+    on arrival (vanilla `SectionRenderDispatcher` readiness behavior). The
+    air/sky fallback exists ONLY for out-of-world Y clamps (`y >= 320` /
+    `y < -64`), never for horizontal chunk edges or corners.
   - When a chunk column completes lighting or voxel modification, it queues dirty remesh flags for:
     - Its own 24 sections.
     - The adjacent 1-voxel border sections of its 4 cardinal neighbors (`W, E, N, S`).
@@ -336,13 +354,24 @@ Known v1 approximations (Step 3/4 refinement list):
   For face normal `N` and tangential axes `U, V`, corner `(u, v)` samples `side1 = N + u·U`, `side2 = N + v·V`, and `corner = N + u·U + v·V`.
   Let `s1 = side1.is_opaque`, `s2 = side2.is_opaque`, `c = corner.is_opaque`.
   $$\text{ao} = \begin{cases} 0 & \text{if } s1 = 1 \land s2 = 1 \\ 3 - (s1 + s2 + c) & \text{otherwise} \end{cases}$$
-- **Sealed-Corner Light Rule**:
-  Vertex light combines `{center, side1, side2, corner}` where `center = N`:
-  - If `s1 = 1 \land s2 = 1`: corner is topologically sealed behind solid walls; `corner` sample is excluded and substituted with `center`.
-  - Any neighbor cell with `is_opaque == 1` has its internal light substituted with `center` so solid walls do not darken adjacent open air/torches.
-  - Deterministic integer blend:
-    $$\text{vertex\_light} = \lfloor \frac{\text{center} + \text{side1'} + \text{side2'} + \text{corner'} + 2}{4} \rfloor$$
-    computed independently for 4-bit `sky_light` and 4-bit `block_light`.
+- **Sealed-Corner Light Rule** (decompile-verified: `BlockModelLighter.java:61-122`
+  + `LightCoordsUtil.smoothBlend` at LightCoordsUtil.java:66-88; for the v1
+  canonical-cube set, "not light-permeable" ≡ `is_opaque == 1`):
+  - `center` = the light of the cell ONE STEP ALONG THE NORMAL
+    (BlockModelLighter.java:117-122 — cubic faces sample `basePosition +
+    direction`), not the face's own cell.
+  - Sealed corner: when BOTH of the vertex's side cells are not
+    light-permeable, the corner sample is substituted by the **first side's**
+    light+shade (BlockModelLighter.java:71-115) — NOT by center.
+  - Substitution is LIGHT-VALUED, never opacity-valued: when `center` has
+    sky > 2 or block > 2, a sample whose packed light coords == 0 is fully
+    replaced by `center`'s coords, and a sample whose sky == 0 borrows
+    `center`'s sky nibble. Opaque-but-bright cells (glowstone wall) keep their
+    own 15 and bleed through corners exactly as vanilla does.
+  - Deterministic integer blend, vanilla-exact (LightCoordsUtil.java:87):
+    $$\text{vertex\_light} = \left(\text{center} + \text{side1'} + \text{side2'} + \text{corner'}\right) \gg 2$$
+    — pure floor average, NO +2 rounding bias; the shift is shared across sky
+    and block nibbles (each 4-bit, so 4×15 >> 2 == 15 exactly).
 - **Quad Diagonal Flip**:
   For quad vertices `v0 (0,0), v1 (1,0), v2 (1,1), v3 (0,1)`:
   Compute diagonal brightness sums:
@@ -351,6 +380,17 @@ Known v1 approximations (Step 3/4 refinement list):
   - If $d_{02} > d_{13}$: triangulate as $(v0, v1, v2)$ and $(v0, v2, v3)$ (split $v0 - v2$).
   - Otherwise: triangulate as $(v1, v2, v3)$ and $(v1, v3, v0)$ (split $v1 - v3$).
   This eliminates anisotropic diagonal shadow seams.
+- **Approximation labels (vs `BlockModelLighter.java:181-194`):** the 3-level
+  integer AO (both-sides→0, else `3 − (s1+s2+c)`) stands in for vanilla's float
+  shade-brightness averages `(s3+s0+sCorner+sCenter)·0.25`; the flip comparator
+  `(ao << 5) + max(sky, block)` stands in for vanilla's smooth light+shade sum
+  comparison (the exact 26.3 flip-deciding site is not yet decompiled — locate
+  and pin its direction via extraction before Task 3 locks the golden).
+  Directional per-face shading (vanilla `getDirectionalBrightness` top/sides/
+  bottom constants) is NOT baked by the mesher; Word 0 `normal_id` carries it
+  to the Step 4 shader. Vanilla's `emissiveRendering` (FULL_BRIGHT) and the
+  partial-face `smoothWeightedBlend` path are out of v1 scope (approximation
+  list candidates when a registry block turns out to use them).
 
 ### 5. Greedy Merge Key
 - Coplanar adjacent faces `(u, v)` and `(u+1, v)` in a 2D slice merge into a larger quad if and only if their merge keys match:
