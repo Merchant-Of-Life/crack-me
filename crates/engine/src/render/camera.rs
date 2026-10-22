@@ -7,6 +7,8 @@ pub struct CameraUniform {
     pub _pad: [u32; 2],
 }
 
+const _: () = assert!(std::mem::size_of::<CameraUniform>() == 80);
+
 impl CameraUniform {
     pub fn new(matrix: glam::Mat4) -> Self {
         Self {

@@ -140,12 +140,6 @@ impl GpuContext {
         };
         surface.configure(&device, &config);
 
-        let adapter_info = adapter.get_info();
-        println!(
-            "Startup: {} | {:?} | {:?}",
-            adapter_info.name, adapter_info.backend, format
-        );
-
         Ok((
             Self {
                 instance,
