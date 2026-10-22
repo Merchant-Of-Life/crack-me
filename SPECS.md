@@ -291,6 +291,82 @@ Known v1 approximations (Step 3/4 refinement list):
    cross-chunk boundary seeding from neighbour light; vanilla's incremental
    add/remove two-queue BFS is deferred until profiling demands it.
 
+## Step 3: Pure CPU Greedy Mesher Architecture & Invariants (pinned 2026-10-22)
+
+### 1. Per-State Registry Consumption (Zero Hardcoded Tables)
+- Engine voxels store raw 16-bit state IDs (`0..=1811`).
+- Never assume `state_id == 0` is air (`0` is `acacia_button`; `air` is row 23).
+- All decisions query `BlockStateEntry` through `registry.rs`.
+- **Renderable Candidate Predicate**:
+  A voxel emits cubic faces if:
+  `entry.mesh_type == MESH_CUBE` (1).
+  Non-renderable / air blocks have `entry.mesh_type == MESH_EMPTY` (0) (air, cave_air, void_air, and entity-rendered blocks).
+  Individual face emission checks `entry.faces[face].base_layer < 2048`.
+
+### 2. Culling Semantics (`is_opaque == canOcclude`)
+- Face culling checks whether the adjacent neighbor along face normal `N` occludes this face:
+  1. **Opaque Neighbor (`neighbor.is_opaque == 1`)**:
+     Always CULLS the face. The neighbor is a full solid block with `canOcclude == true` (stone, dirt, packed_ice, etc.).
+  2. **Empty Neighbor (`neighbor.mesh_type == MESH_EMPTY`)**:
+     NEVER culls the face. Air/empty blocks leave the face fully exposed.
+  3. **Adjacent Non-Opaque Blocks (`neighbor.is_opaque == 0`)**:
+     Evaluated strictly via `BlockStateEntry` fields without hardcoded ID tables:
+     - **Fluid-to-Fluid**: If `curr.mesh_type == MESH_FLUID && neighbor.mesh_type == MESH_FLUID`, cull shared internal face (water-to-water, lava-to-lava).
+     - **Leaves-to-Leaves (Fancy Graphics)**: If `curr.faces[face].tint_mode == 2` (foliage tint) and `neighbor.faces[opp].tint_mode == 2`, DO NOT CULL (`cutoutLeaves` Fancy mode draws internal leaf canopy faces).
+     - **Identical Transparent Cubes (Glass, Ice, Stained Glass)**:
+       If `curr.faces[face].base_layer == neighbor.faces[opp].base_layer` AND `curr.faces[face].tint_mode != 2`:
+       CULL shared interface. This handles glass-to-glass, same-color stained glass, ice-to-ice, and slime-to-slime using only texture layer identity. Dissimilar transparent blocks (e.g. glass against ice, red glass against blue glass) have distinct `base_layer` values and therefore do NOT cull.
+
+### 3. 8-Neighbor Halo Access & Scheduling Policy
+- **18×18×18 Padded Halo**: Meshing a 16³ section with 4-corner AO and vertex lighting requires sampling `x, y, z ∈ [-1, 16]`.
+  - Cardinal faces read from the 4 cardinal horizontal neighbors: West (`-X`), East (`+X`), North (`-Z`), South (`+Z`).
+  - Corner vertices at `(0,0), (16,0), (0,16), (16,16)` read corner voxels AND light at `(x, z) ∈ {(-1,-1), (16,-1), (-1,16), (16,16)}`, which reside in the 4 diagonal neighbor chunks: North-West (`NW`), North-East (`NE`), South-West (`SW`), South-East (`SE`).
+  - Vertical limits: `y >= 320` clamps to sky 15 / block 0 / air; `y < -64` clamps to sky 0 / block 0 / air.
+- **Neighborhood Input**:
+  A `SectionHalo` buffer holding `voxels: [u16; 18 * 18 * 18]` (~11.6 KB) and `light: [u8; 18 * 18 * 18]` (~5.8 KB) extracted once per section before sweeping slices. Total footprint (~17.5 KB) resides fully in CPU L1 data cache, eliminating pointer chasing and chunk bounds branches in inner loops.
+- **Missing-Neighbor & Dirty Remesh Policy**:
+  - Missing neighbor columns at world borders/loading edges default to air with sky=15, block=0 (above ground) or sky=0, block=0 (underground).
+  - When a chunk column completes lighting or voxel modification, it queues dirty remesh flags for:
+    - Its own 24 sections.
+    - The adjacent 1-voxel border sections of its 4 cardinal neighbors (`W, E, N, S`).
+    - The corner columns of its 4 diagonal neighbors (`NW, NE, SW, SE`).
+
+### 4. 4-Corner AO Formula, Sealed-Corner Light Rule, & Quad Diagonal Flip
+- **4-Corner AO Formula**:
+  For face normal `N` and tangential axes `U, V`, corner `(u, v)` samples `side1 = N + u·U`, `side2 = N + v·V`, and `corner = N + u·U + v·V`.
+  Let `s1 = side1.is_opaque`, `s2 = side2.is_opaque`, `c = corner.is_opaque`.
+  $$\text{ao} = \begin{cases} 0 & \text{if } s1 = 1 \land s2 = 1 \\ 3 - (s1 + s2 + c) & \text{otherwise} \end{cases}$$
+- **Sealed-Corner Light Rule**:
+  Vertex light combines `{center, side1, side2, corner}` where `center = N`:
+  - If `s1 = 1 \land s2 = 1`: corner is topologically sealed behind solid walls; `corner` sample is excluded and substituted with `center`.
+  - Any neighbor cell with `is_opaque == 1` has its internal light substituted with `center` so solid walls do not darken adjacent open air/torches.
+  - Deterministic integer blend:
+    $$\text{vertex\_light} = \lfloor \frac{\text{center} + \text{side1'} + \text{side2'} + \text{corner'} + 2}{4} \rfloor$$
+    computed independently for 4-bit `sky_light` and 4-bit `block_light`.
+- **Quad Diagonal Flip**:
+  For quad vertices `v0 (0,0), v1 (1,0), v2 (1,1), v3 (0,1)`:
+  Compute diagonal brightness sums:
+  $$d_{02} = \text{brightness}(v0) + \text{brightness}(v2), \quad d_{13} = \text{brightness}(v1) + \text{brightness}(v3)$$
+  where $\text{brightness}(v) = (\text{ao} \ll 5) + \max(\text{sky}, \text{block})$.
+  - If $d_{02} > d_{13}$: triangulate as $(v0, v1, v2)$ and $(v0, v2, v3)$ (split $v0 - v2$).
+  - Otherwise: triangulate as $(v1, v2, v3)$ and $(v1, v3, v0)$ (split $v1 - v3$).
+  This eliminates anisotropic diagonal shadow seams.
+
+### 5. Greedy Merge Key
+- Coplanar adjacent faces `(u, v)` and `(u+1, v)` in a 2D slice merge into a larger quad if and only if their merge keys match:
+  ```rust
+  #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+  pub struct FaceMergeKey {
+      pub base_layer: u16,
+      pub tint_mode: u8,
+      pub uv_rot: u8,
+      pub corner_ao: [u8; 4],
+      pub corner_sky: [u8; 4],
+      pub corner_block: [u8; 4],
+  }
+  ```
+- Merging occurs only across surfaces with identical texture, tint, and 4-corner AO/lighting values. Flat uniform surfaces merge into maximal rectangular quads (up to 16×16), while AO shadows and torch falloff edges are preserved with 100% vertex precision.
+
 ```mermaid
 flowchart TD
     Step1["Step 1: Asset Pipeline Overhaul [DONE]<br/>• Extracted models, blockstates, mcmetas<br/>• 1,843 layers baked with 5 offline linear mips<br/>• Coverage-preserving alpha scaling<br/>• Timeline table & manifest exported"] --> Step2["Step 2: Block Registry & Model Resolver [DONE]<br/>• block_registry.bin: 1,288 blocks / 1,812 state rows (32 B)<br/>• structural classification + variant rotation math<br/>• tint decisions from BlockColors oracle; golden tests green"]
