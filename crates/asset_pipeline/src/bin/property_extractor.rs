@@ -96,6 +96,84 @@ fn reg_bodies(src: &str) -> Vec<(usize, String)> {
     out
 }
 
+fn parse_weathering_copper_prefixes(decomp_dir: &Path) -> Vec<String> {
+    let coll_path = decomp_dir.join("WeatheringCopperCollection.java");
+    if let Ok(src) = fs::read_to_string(&coll_path) {
+        if let Some(at) = src.find("PREFIXES =") {
+            let slice = &src[at..src.len().min(at + 500)];
+            let mut prefixes = Vec::new();
+            let mut in_str = false;
+            let mut cur = String::new();
+            for c in slice.chars() {
+                if c == '"' {
+                    if in_str {
+                        prefixes.push(cur.clone());
+                        cur.clear();
+                        in_str = false;
+                    } else {
+                        in_str = true;
+                    }
+                } else if in_str {
+                    cur.push(c);
+                }
+                if prefixes.len() == 8 {
+                    break;
+                }
+            }
+            if prefixes.len() == 8 {
+                return prefixes;
+            }
+        }
+    }
+    vec![
+        "".to_string(),
+        "exposed_".to_string(),
+        "weathered_".to_string(),
+        "oxidized_".to_string(),
+        "waxed_".to_string(),
+        "waxed_exposed_".to_string(),
+        "waxed_weathered_".to_string(),
+        "waxed_oxidized_".to_string(),
+    ]
+}
+
+fn parse_copper_block_special_names(decomp_dir: &Path) -> Vec<String> {
+    let ids_path = decomp_dir.join("BlockItemIds.java");
+    if let Ok(src) = fs::read_to_string(&ids_path) {
+        if let Some(at) = src.find("COPPER_BLOCK_SPECIAL_NAMES") {
+            let slice = &src[at..src.len().min(at + 300)];
+            let mut names = Vec::new();
+            let mut in_str = false;
+            let mut cur = String::new();
+            for c in slice.chars() {
+                if c == '"' {
+                    if in_str {
+                        names.push(cur.clone());
+                        cur.clear();
+                        in_str = false;
+                    } else {
+                        in_str = true;
+                    }
+                } else if in_str {
+                    cur.push(c);
+                }
+                if names.len() == 4 {
+                    break;
+                }
+            }
+            if names.len() == 4 {
+                return names;
+            }
+        }
+    }
+    vec![
+        "copper_block".to_string(),
+        "copper".to_string(),
+        "copper".to_string(),
+        "copper".to_string(),
+    ]
+}
+
 /// Block name from the registration FIELD (left side of `=`). Field names track the
 /// canonical block ids far more reliably than the id constants (e.g. CAVE_VINES
 /// registers under `BlockItemIds.GLOW_BERRY_CROP`).
@@ -104,26 +182,43 @@ fn reg_name(body: &str) -> Option<String> {
     let head = body[..eq].trim_end();
     let name = head.rsplit(' ').next()?.trim();
     if name.is_empty() {
-        None
-    } else {
-        Some(name.to_lowercase())
+        return None;
     }
+    let lower = name.to_lowercase();
+    if lower == "potted_azalea" {
+        return Some("potted_azalea_bush".to_string());
+    }
+    if lower == "potted_flowering_azalea" {
+        return Some("potted_flowering_azalea_bush".to_string());
+    }
+    Some(lower)
 }
 
 /// Final registered ids produced by one registration statement: wrapper forms
 /// (`ColorCollection` / `WeatheringCopperCollection`) expand to their member ids.
-fn reg_ids(body: &str, base: &str) -> Vec<String> {
-    if body.contains("ColorCollection.registerBlocks(") {
+fn reg_ids(
+    body: &str,
+    base: &str,
+    copper_prefixes: &[String],
+    copper_special: &[String],
+) -> Vec<String> {
+    if body.contains("ColorCollection.registerBlocks(") || body.contains("ColorCollection.zipMap(") {
         let base = base.strip_prefix("dyed_").unwrap_or(base);
         return DYED_COLORS.iter().map(|c| format!("{c}_{base}")).collect();
     }
     if body.contains("WeatheringCopperCollection.registerBlocks(") {
-        return vec![
-            base.to_string(),
-            format!("exposed_{base}"),
-            format!("weathered_{base}"),
-            format!("oxidized_{base}"),
-        ];
+        return copper_prefixes
+            .iter()
+            .enumerate()
+            .map(|(i, prefix)| {
+                let name = if base == "copper_block" {
+                    &copper_special[i % copper_special.len()]
+                } else {
+                    base
+                };
+                format!("{prefix}{name}")
+            })
+            .collect();
     }
     vec![base.to_string()]
 }
@@ -368,7 +463,7 @@ fn expand_per_id(rec: &OutRec, ids: &[String]) -> Vec<(String, OutRec)> {
                 .map(|(i, id)| {
                     (
                         id.clone(),
-                        OutRec::Resolved(json!({"kind": "lit", "value": stage_value(i as u8 + 1)})),
+                        OutRec::Resolved(json!({"kind": "lit", "value": stage_value(((i % 4) as u8) + 1)})),
                     )
                 })
                 .collect();
@@ -419,7 +514,12 @@ fn main() {
 
     let helpers = collect_helpers(&src);
 
+    let decomp_dir = Path::new(&src_path).parent().unwrap_or_else(|| Path::new("."));
+    let copper_prefixes = parse_weathering_copper_prefixes(decomp_dir);
+    let copper_special = parse_copper_block_special_names(decomp_dir);
+
     // pass 1 — harvest records (own or legacy) + occlusion/skylight sets
+    let mut all_harvested_ids: BTreeSet<String> = BTreeSet::new();
     let mut records: BTreeMap<String, OutRec> = BTreeMap::new();
     let mut no_occlusion: BTreeSet<String> = BTreeSet::new();
     let mut skylight: BTreeSet<String> = BTreeSet::new();
@@ -428,7 +528,8 @@ fn main() {
 
     for (decl_line, raw) in reg_bodies(&src) {
         let Some(base) = reg_name(&raw) else { continue };
-        let ids = reg_ids(&raw, &base);
+        let ids = reg_ids(&raw, &base, &copper_prefixes, &copper_special);
+        all_harvested_ids.extend(ids.iter().cloned());
         let body = substitute_body(&raw, &helpers);
 
         match classify_reg(&body) {
@@ -555,6 +656,47 @@ fn main() {
     let no_occlusion_n = no_occlusion.len();
     let skylight_n = skylight.len();
     let cull_classes_n = cull_classes.len();
+
+    // Coverage report: scan registry blockstates from assets/blockstates
+    let blockstates_dir = Path::new("assets/blockstates");
+    let mut registry_blocks: BTreeSet<String> = BTreeSet::new();
+    if let Ok(entries) = fs::read_dir(blockstates_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    registry_blocks.insert(stem.to_string());
+                }
+            }
+        }
+    }
+
+    let mut covered_blocks: BTreeSet<String> = BTreeSet::new();
+    covered_blocks.extend(emit_map.keys().cloned());
+    covered_blocks.extend(no_occlusion.iter().cloned());
+    covered_blocks.extend(skylight.iter().cloned());
+    covered_blocks.extend(cull_classes.keys().cloned());
+
+    let unharvested_from_blocks_java: Vec<String> = registry_blocks
+        .iter()
+        .filter(|b| !all_harvested_ids.contains(*b))
+        .cloned()
+        .collect();
+
+    let absent_from_all_maps: Vec<String> = registry_blocks
+        .iter()
+        .filter(|b| !covered_blocks.contains(*b))
+        .cloned()
+        .collect();
+
+    println!("=================== EXTRACTOR COVERAGE REPORT ===================");
+    println!("Registry blocks scanned from assets/blockstates: {}", registry_blocks.len());
+    println!("Blocks harvested from Blocks.java: {}", all_harvested_ids.len());
+    println!("Blocks with non-default properties (covered by at least 1 map): {}", covered_blocks.len());
+    println!("Blocks absent from Blocks.java harvest ({}): {:?}", unharvested_from_blocks_java.len(), unharvested_from_blocks_java);
+    println!("Blocks with standard opaque defaults (absent from all 4 maps): {}", absent_from_all_maps.len());
+    println!("=================================================================");
+
     let json = json!({
         "version": 1,
         "generated_by": "property_extractor (the only non-hermetic pipeline step; baker reads this JSON)",
@@ -566,6 +708,13 @@ fn main() {
         "no_occlusion": no_occlusion.into_iter().collect::<Vec<_>>(),
         "skylight": skylight.into_iter().collect::<Vec<_>>(),
         "cull_classes": cull_classes,
+        "coverage_report": {
+            "total_registry_blocks": registry_blocks.len(),
+            "harvested_blocks": all_harvested_ids.len(),
+            "unharvested_blocks": unharvested_from_blocks_java,
+            "blocks_with_custom_properties": covered_blocks.len(),
+            "blocks_with_opaque_defaults": absent_from_all_maps.len(),
+        },
     });
 
     if let Some(parent) = Path::new(&out_path).parent() {

@@ -24,7 +24,7 @@
 
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ---------------------------------------------------------------------------
 // Face / state layout (mirrors SPECS.md §BlockStateEntry)
@@ -1192,6 +1192,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn assets_dir() -> PathBuf {
         // crates/asset_pipeline/src/bin -> repo root is 3 levels up

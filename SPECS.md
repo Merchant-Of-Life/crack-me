@@ -322,6 +322,15 @@ Known v1 approximations (Step 3/4 refinement list):
      extraction) — is harvested by `property_extractor` from the registration
      classes into `block_properties.json` and baked into row `pad[0]` as a
      `cull_class` byte (row stays 32 B). Never hand-typed in engine or baker.
+     Encoding: 0 = none (opaque handled by `is_opaque`), 1 = leaves family,
+     2 = water, 3 = lava, >=4 = per-block transparent identity ids (glass,
+     tinted_glass, each stained-glass color separately, ice, frosted_ice,
+     blue_ice, slime_block, honey_block, copper-grate family).
+     VERIFIED (review 2026-10-22): `waxed_*_copper_grate` rows resolved via
+     targeted decompile of `WeatheringCopperCollection.java` (8 variants discovered
+     programmatically) -> harvested into `cull_classes`, `no_occlusion`, and `skylight`
+     maps; coverage report embedded in `block_properties.json` confirms 1,286/1,288
+     blocks harvested from `Blocks.java` (only `item_frame` and `glow_item_frame` absent).
      - **Same non-opaque block** (glass|glass, same stained-glass color,
        ice|ice, slime|slime, same fluid water|water / lava|lava): CULL.
      - **Different blocks** (water vs lava, glass vs ice, red vs blue stained
@@ -384,8 +393,14 @@ Known v1 approximations (Step 3/4 refinement list):
   integer AO (both-sides→0, else `3 − (s1+s2+c)`) stands in for vanilla's float
   shade-brightness averages `(s3+s0+sCorner+sCenter)·0.25`; the flip comparator
   `(ao << 5) + max(sky, block)` stands in for vanilla's smooth light+shade sum
-  comparison (the exact 26.3 flip-deciding site is not yet decompiled — locate
-  and pin its direction via extraction before Task 3 locks the golden).
+  comparison — direction now pinned to the Sodium reference implementation
+  from the installed instance (`ModelQuadOrientation.orientByBrightness`
+  bytecode, read 2026-10-22): `d02 > d13` → NORMAL (split `v0 − v2`);
+  `d02 < d13` → FLIP (split `v1 − v3`); on an exact tie, FLIP iff
+  `sum(max(sky,block) over v0,v2) > sum(max(sky,block) over v1,v3)`
+  (Sodium's fallback key compares its own light-coord sums with
+  `l02 <= l13 → NORMAL`; ours is the integer-shadow analog). If a
+  vanilla-26.3 flip site is ever decompiled and disagrees, vanilla wins.
   Directional per-face shading (vanilla `getDirectionalBrightness` top/sides/
   bottom constants) is NOT baked by the mesher; Word 0 `normal_id` carries it
   to the Step 4 shader. Vanilla's `emissiveRendering` (FULL_BRIGHT) and the

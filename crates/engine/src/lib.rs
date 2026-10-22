@@ -970,4 +970,192 @@ mod tests {
         assert_eq!(verts_normal[0].y(), v0.1);
         assert_eq!(verts_normal[0].z(), v0.2);
     }
+
+    #[test]
+    fn test_stained_glass_distinct_color_culling() {
+        let reg = load_oracle_registry();
+        let red_id = state_id_of(&reg, "red_stained_glass");
+        let blue_id = state_id_of(&reg, "blue_stained_glass");
+        let green_id = state_id_of(&reg, "green_stained_glass");
+        let clear_id = state_id_of(&reg, "glass");
+        let grate_id = state_id_of(&reg, "copper_grate");
+        let waxed_grate_id = state_id_of(&reg, "waxed_copper_grate");
+
+        let red = reg.get_state_unchecked(red_id as u32);
+        let blue = reg.get_state_unchecked(blue_id as u32);
+        let green = reg.get_state_unchecked(green_id as u32);
+        let clear = reg.get_state_unchecked(clear_id as u32);
+        let grate = reg.get_state_unchecked(grate_id as u32);
+        let waxed_grate = reg.get_state_unchecked(waxed_grate_id as u32);
+
+        // 1. Transparent blocks must have cull_class >= CULL_TRANSPARENT_START
+        assert!(red.cull_class() >= CULL_TRANSPARENT_START);
+        assert!(blue.cull_class() >= CULL_TRANSPARENT_START);
+        assert!(green.cull_class() >= CULL_TRANSPARENT_START);
+        assert!(clear.cull_class() >= CULL_TRANSPARENT_START);
+        assert!(grate.cull_class() >= CULL_TRANSPARENT_START);
+        assert!(waxed_grate.cull_class() >= CULL_TRANSPARENT_START);
+
+        // 2. Distinct colors and types have distinct cull identities
+        assert_ne!(red.cull_class(), blue.cull_class());
+        assert_ne!(red.cull_class(), green.cull_class());
+        assert_ne!(red.cull_class(), clear.cull_class());
+        assert_ne!(blue.cull_class(), clear.cull_class());
+
+        // 3. Waxed copper grate has distinct identity from unwaxed copper grate (HalfTransparentBlock.is(this))
+        assert_ne!(grate.cull_class(), waxed_grate.cull_class());
+        assert_eq!(waxed_grate.is_opaque, 0);
+
+        // 4. Same color / block identity culls internal boundary
+        assert!(should_cull_face(red, red), "red | red must cull");
+        assert!(should_cull_face(blue, blue), "blue | blue must cull");
+        assert!(should_cull_face(clear, clear), "clear | clear must cull");
+        assert!(should_cull_face(grate, grate), "copper_grate | copper_grate must cull");
+        assert!(should_cull_face(waxed_grate, waxed_grate), "waxed_copper_grate | waxed_copper_grate must cull");
+
+        // 5. Different colors / block identities render BOTH boundaries
+        assert!(!should_cull_face(red, blue), "red | blue renders both");
+        assert!(!should_cull_face(blue, red), "blue | red renders both");
+        assert!(!should_cull_face(red, clear), "red | clear renders both");
+        assert!(!should_cull_face(clear, red), "clear | red renders both");
+        assert!(!should_cull_face(grate, waxed_grate), "copper_grate | waxed_copper_grate renders both");
+        assert!(!should_cull_face(waxed_grate, grate), "waxed_copper_grate | copper_grate renders both");
+        assert!(!should_cull_face(grate, red), "copper_grate | red renders both");
+    }
+
+    #[test]
+    fn test_sealed_corner_explicit_side1_substitution() {
+        let reg = load_oracle_registry();
+        let air_id = state_id_of(&reg, "air");
+        let stone_id = state_id_of(&reg, "stone");
+
+        let center = (0, 0, 0);
+        let side1 = (-1, 0, 0);
+        let side2 = (0, 0, -1);
+        let corner = (-1, 0, -1);
+
+        // Pattern: center = 0, side1 = 4, side2 = 8, corner = 15
+        let mut halo = SectionHalo::new();
+        halo.set_voxel(center.0, center.1, center.2, air_id);
+        halo.set_packed_light(center.0, center.1, center.2, 0x00); // 0 sky, 0 block
+
+        halo.set_voxel(side1.0, side1.1, side1.2, stone_id); // opaque side1
+        halo.set_packed_light(side1.0, side1.1, side1.2, 0x44); // 4 sky, 4 block
+
+        halo.set_voxel(side2.0, side2.1, side2.2, stone_id); // opaque side2
+        halo.set_packed_light(side2.0, side2.1, side2.2, 0x88); // 8 sky, 8 block
+
+        halo.set_voxel(corner.0, corner.1, corner.2, stone_id); // opaque corner
+        halo.set_packed_light(corner.0, corner.1, corner.2, 0xFF); // 15 sky, 15 block
+
+        // Case A: Sealed corner (side1 & side2 both opaque):
+        // corner must be explicitly substituted by side1 (value 4).
+        // sum = center(0) + side1(4) + side2(8) + corner_substituted_by_side1(4) = 16.
+        // light = 16 >> 2 = 4.
+        // (Note: if corner were unsubstituted (15): sum = 27 >> 2 = 6.
+        //        if corner were side2 (8):         sum = 20 >> 2 = 5.
+        //        if corner were center (0):        sum = 12 >> 2 = 3.
+        // Only side1 substitution mathematically yields exactly 4.)
+        let (ao_sealed, sky_sealed, blk_sealed) = compute_corner(&halo, &reg, center, side1, side2, corner);
+        assert_eq!(ao_sealed, 0, "sealed corner has ao = 0");
+        assert_eq!(sky_sealed, 4, "sealed corner must substitute side1 for sky light");
+        assert_eq!(blk_sealed, 4, "sealed corner must substitute side1 for block light");
+
+        // Case B: Unsealed corner (side2 changed to non-opaque air):
+        // corner is NOT sealed, so its actual light (15) is retained without substitution.
+        // sum = center(0) + side1(4) + side2(8) + corner(15) = 27.
+        // light = 27 >> 2 = 6.
+        halo.set_voxel(side2.0, side2.1, side2.2, air_id);
+        let (ao_unsealed, sky_unsealed, blk_unsealed) = compute_corner(&halo, &reg, center, side1, side2, corner);
+        assert_eq!(ao_unsealed, 1, "unsealed corner with 2 opaque blocks has ao = 1");
+        assert_eq!(sky_unsealed, 6, "unsealed corner preserves corner light (sum 27 >> 2 = 6)");
+        assert_eq!(blk_unsealed, 6, "unsealed corner preserves corner light (sum 27 >> 2 = 6)");
+    }
+
+    #[test]
+    fn test_face_winding_normals_golden() {
+        // Face normal definitions and unit normal vectors:
+        // 0: +Y (0, 1, 0)
+        // 1: -Y (0, -1, 0)
+        // 2: +Z (0, 0, 1)
+        // 3: -Z (0, 0, -1)
+        // 4: +X (1, 0, 0)
+        // 5: -X (-1, 0, 0)
+        let expected_normals: [(i32, i32, i32); 6] = [
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+            (1, 0, 0),
+            (-1, 0, 0),
+        ];
+
+        // The quad corners (v0, v1, v2, v3) in canonical order for a unit voxel at (0, 0, 0)
+        // matching the mesher's coordinate emitter:
+        let face_quads: [((u32, u32, u32), (u32, u32, u32), (u32, u32, u32), (u32, u32, u32)); 6] = [
+            // 0: FACE_UP (+Y, y = 1)
+            ((0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0)),
+            // 1: FACE_DOWN (-Y, y = 0)
+            ((0, 0, 1), (0, 0, 0), (1, 0, 0), (1, 0, 1)),
+            // 2: FACE_SOUTH (+Z, z = 1)
+            ((0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1)),
+            // 3: FACE_NORTH (-Z, z = 0)
+            ((1, 1, 0), (1, 0, 0), (0, 0, 0), (0, 1, 0)),
+            // 4: FACE_EAST (+X, x = 1)
+            ((1, 1, 1), (1, 0, 1), (1, 0, 0), (1, 1, 0)),
+            // 5: FACE_WEST (-X, x = 0)
+            ((0, 1, 0), (0, 0, 0), (0, 0, 1), (0, 1, 1)),
+        ];
+
+        let key_normal = FaceMergeKey {
+            base_layer: 1,
+            tint_mode: 0,
+            uv_rot: 0,
+            corner_ao: [3, 3, 3, 3], // symmetric -> flip = false
+            corner_sky: [15, 15, 15, 15],
+            corner_block: [0, 0, 0, 0],
+        };
+
+        let key_flipped = FaceMergeKey {
+            base_layer: 1,
+            tint_mode: 0,
+            uv_rot: 0,
+            corner_ao: [1, 3, 3, 3], // d02 (4) < d13 (6) -> flip = true
+            corner_sky: [15, 15, 15, 15],
+            corner_block: [0, 0, 0, 0],
+        };
+
+        for (face_idx, &(v0, v1, v2, v3)) in face_quads.iter().enumerate() {
+            let exp_n = expected_normals[face_idx];
+
+            for (branch_name, key) in [("normal", &key_normal), ("flipped", &key_flipped)] {
+                let mut verts = Vec::with_capacity(6);
+                emit_quad(&mut verts, v0, v1, v2, v3, face_idx as u32, key);
+                assert_eq!(verts.len(), 6, "face {} ({}) must emit 6 vertices", face_idx, branch_name);
+
+                // Two triangles per quad: (0, 1, 2) and (3, 4, 5)
+                for tri_idx in 0..2 {
+                    let base = tri_idx * 3;
+                    let p0 = (verts[base].x() as i32, verts[base].y() as i32, verts[base].z() as i32);
+                    let p1 = (verts[base + 1].x() as i32, verts[base + 1].y() as i32, verts[base + 1].z() as i32);
+                    let p2 = (verts[base + 2].x() as i32, verts[base + 2].y() as i32, verts[base + 2].z() as i32);
+
+                    // Cross product (p1 - p0) x (p2 - p0) for CCW front-face normal
+                    let e1 = (p1.0 - p0.0, p1.1 - p0.1, p1.2 - p0.2);
+                    let e2 = (p2.0 - p0.0, p2.1 - p0.1, p2.2 - p0.2);
+                    let nx = e1.1 * e2.2 - e1.2 * e2.1;
+                    let ny = e1.2 * e2.0 - e1.0 * e2.2;
+                    let nz = e1.0 * e2.1 - e1.1 * e2.0;
+
+                    let dot = nx * exp_n.0 + ny * exp_n.1 + nz * exp_n.2;
+                    assert!(
+                        dot > 0,
+                        "face {} ({}) tri {} winding cross-product ({}, {}, {}) dot expected ({}, {}, {}) = {} (must be > 0)",
+                        face_idx, branch_name, tri_idx, nx, ny, nz, exp_n.0, exp_n.1, exp_n.2, dot
+                    );
+                    assert_eq!((nx, ny, nz), exp_n, "computed normal must exactly match unit normal");
+                }
+            }
+        }
+    }
 }

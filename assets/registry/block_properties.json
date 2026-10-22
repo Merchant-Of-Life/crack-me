@@ -1,4 +1,14 @@
 {
+  "coverage_report": {
+    "blocks_with_custom_properties": 356,
+    "blocks_with_opaque_defaults": 932,
+    "harvested_blocks": 1286,
+    "total_registry_blocks": 1288,
+    "unharvested_blocks": [
+      "glow_item_frame",
+      "item_frame"
+    ]
+  },
   "cull_classes": {
     "acacia_leaves": "leaves",
     "azalea_leaves": "leaves",
@@ -39,6 +49,10 @@
     "spruce_leaves": "leaves",
     "tinted_glass": "tinted_glass",
     "water": "water",
+    "waxed_copper_grate": "waxed_copper_grate",
+    "waxed_exposed_copper_grate": "waxed_exposed_copper_grate",
+    "waxed_oxidized_copper_grate": "waxed_oxidized_copper_grate",
+    "waxed_weathered_copper_grate": "waxed_weathered_copper_grate",
     "weathered_copper_grate": "weathered_copper_grate",
     "white_stained_glass": "white_stained_glass",
     "yellow_poplar_leaves": "leaves",
@@ -602,6 +616,46 @@
       "kind": "constant",
       "value": 14
     },
+    "waxed_copper_bulb": {
+      "decl": "Blocks.java:221429",
+      "kind": "lit",
+      "value": 15
+    },
+    "waxed_copper_lantern": {
+      "decl": "Blocks.java:184455",
+      "kind": "constant",
+      "value": 15
+    },
+    "waxed_exposed_copper_bulb": {
+      "decl": "Blocks.java:221429",
+      "kind": "lit",
+      "value": 12
+    },
+    "waxed_exposed_copper_lantern": {
+      "decl": "Blocks.java:184455",
+      "kind": "constant",
+      "value": 15
+    },
+    "waxed_oxidized_copper_bulb": {
+      "decl": "Blocks.java:221429",
+      "kind": "lit",
+      "value": 4
+    },
+    "waxed_oxidized_copper_lantern": {
+      "decl": "Blocks.java:184455",
+      "kind": "constant",
+      "value": 15
+    },
+    "waxed_weathered_copper_bulb": {
+      "decl": "Blocks.java:221429",
+      "kind": "lit",
+      "value": 8
+    },
+    "waxed_weathered_copper_lantern": {
+      "decl": "Blocks.java:184455",
+      "kind": "constant",
+      "value": 15
+    },
     "weathered_copper_bulb": {
       "decl": "Blocks.java:221429",
       "kind": "lit",
@@ -805,7 +859,7 @@
     "poplar_trapdoor",
     "potted_acacia_sapling",
     "potted_allium",
-    "potted_azalea",
+    "potted_azalea_bush",
     "potted_azure_bluet",
     "potted_bamboo",
     "potted_birch_sapling",
@@ -821,7 +875,7 @@
     "potted_dark_oak_sapling",
     "potted_dead_bush",
     "potted_fern",
-    "potted_flowering_azalea",
+    "potted_flowering_azalea_bush",
     "potted_golden_dandelion",
     "potted_jungle_sapling",
     "potted_lily_of_the_valley",
@@ -875,6 +929,38 @@
     "vault",
     "warped_door",
     "warped_trapdoor",
+    "waxed_copper_bars",
+    "waxed_copper_chain",
+    "waxed_copper_door",
+    "waxed_copper_golem_statue",
+    "waxed_copper_grate",
+    "waxed_copper_lantern",
+    "waxed_copper_trapdoor",
+    "waxed_exposed_copper_bars",
+    "waxed_exposed_copper_chain",
+    "waxed_exposed_copper_door",
+    "waxed_exposed_copper_golem_statue",
+    "waxed_exposed_copper_grate",
+    "waxed_exposed_copper_lantern",
+    "waxed_exposed_copper_trapdoor",
+    "waxed_exposed_lightning_rod",
+    "waxed_lightning_rod",
+    "waxed_oxidized_copper_bars",
+    "waxed_oxidized_copper_chain",
+    "waxed_oxidized_copper_door",
+    "waxed_oxidized_copper_golem_statue",
+    "waxed_oxidized_copper_grate",
+    "waxed_oxidized_copper_lantern",
+    "waxed_oxidized_copper_trapdoor",
+    "waxed_oxidized_lightning_rod",
+    "waxed_weathered_copper_bars",
+    "waxed_weathered_copper_chain",
+    "waxed_weathered_copper_door",
+    "waxed_weathered_copper_golem_statue",
+    "waxed_weathered_copper_grate",
+    "waxed_weathered_copper_lantern",
+    "waxed_weathered_copper_trapdoor",
+    "waxed_weathered_lightning_rod",
     "weathered_copper_bars",
     "weathered_copper_chain",
     "weathered_copper_door",
@@ -916,6 +1002,10 @@
     "pink_stained_glass",
     "purple_stained_glass",
     "red_stained_glass",
+    "waxed_copper_grate",
+    "waxed_exposed_copper_grate",
+    "waxed_oxidized_copper_grate",
+    "waxed_weathered_copper_grate",
     "weathered_copper_grate",
     "white_stained_glass",
     "yellow_stained_glass"
