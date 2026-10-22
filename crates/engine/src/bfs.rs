@@ -16,6 +16,10 @@
 //! cardinal horizontal boundaries (West, East, North, South). Combining downward-sky-15
 //! with W/E/N/S boundary seeding is mathematically identical to full 3D boundary
 //! propagation in vanilla.
+//!
+//! Vanilla's no-decrement downward sky flow exists ONLY on per-(x, z) direct vertical
+//! columns, which never cross horizontal chunk borders; every horizontal chunk border
+//! crossing is lateral and therefore always decremented.
 
 use std::collections::VecDeque;
 

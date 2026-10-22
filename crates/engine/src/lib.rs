@@ -127,6 +127,31 @@ impl PackedVoxelVertex {
     pub fn base_layer(&self) -> u32 {
         (self.word1 >> 10) & 0x07FF
     }
+
+    #[inline(always)]
+    pub fn set_dry_foliage(&mut self, val: bool) {
+        if val {
+            self.word1 |= 1 << 21;
+        } else {
+            self.word1 &= !(1 << 21);
+        }
+    }
+
+    #[inline(always)]
+    pub fn dry_foliage(&self) -> bool {
+        (self.word1 & (1 << 21)) != 0
+    }
+
+    #[inline(always)]
+    pub fn set_registry_tint_mode(&mut self, tint_mode: u8) {
+        if tint_mode == 4 {
+            self.word0 &= !(0x03 << 18);
+            self.set_dry_foliage(true);
+        } else {
+            self.word0 = (self.word0 & !(0x03 << 18)) | (((tint_mode as u32) & 0x03) << 18);
+            self.set_dry_foliage(false);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -510,5 +535,34 @@ mod tests {
         assert_eq!(v.sky_light(), 15);
         assert_eq!(v.ao(), 3);
         assert_eq!(v.base_layer(), 100);
+    }
+
+    #[test]
+    fn test_set_registry_tint_mode_helper() {
+        let mut v = PackedVoxelVertex::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+        for mode in 0..=3 {
+            v.set_registry_tint_mode(mode);
+            assert_eq!(v.tint_mode(), mode as u32);
+            assert!(!v.dry_foliage(), "tint_mode 0..=3 must clear dry_foliage");
+            assert_eq!(v.word1 & (1 << 21), 0);
+        }
+
+        v.set_registry_tint_mode(4);
+        assert_eq!(v.tint_mode(), 0, "tint_mode == 4 must route Word 0 tint to 0");
+        assert!(v.dry_foliage(), "tint_mode == 4 must set dry_foliage bit");
+        assert_ne!(v.word1 & (1 << 21), 0);
+
+        // Switching back clears dry_foliage and sets Word 0 tint
+        v.set_registry_tint_mode(1);
+        assert_eq!(v.tint_mode(), 1);
+        assert!(!v.dry_foliage());
+        assert_eq!(v.word1 & (1 << 21), 0);
+
+        // Direct set_dry_foliage toggle
+        v.set_dry_foliage(true);
+        assert!(v.dry_foliage());
+        v.set_dry_foliage(false);
+        assert!(!v.dry_foliage());
     }
 }
