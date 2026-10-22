@@ -583,8 +583,30 @@ flowchart TD
     - `1` (`TINT_GRASS`): Biome grass tint, defaulting to Plains `#79C05A` (`vec3(0.4745, 0.7529, 0.3529)`) [APPROX-RENDERING-07]
     - `2` (`TINT_FOLIAGE`): Biome foliage tint, defaulting to Plains `#59C93C` (`vec3(0.3490, 0.7882, 0.2353)`) [APPROX-RENDERING-07]
     - `3` (`TINT_WATER`): Biome water tint, defaulting to Plains `#3F76E4` (`vec3(0.2471, 0.4627, 0.8941)`) [APPROX-RENDERING-07]
-  - **Colormap Texture Assets**:
-    - Extracted offline from release jar into `assets/textures/colormap/*.png`:
+  - **Tint Color Space — REVIEW FINDING (2026-10-22), REQUIREMENT R8**: runtime
+  tints multiply LINEAR sampled values (hardware decodes `Rgba8UnormSrgb`
+  textures), so every `evaluate_tint` constant MUST be the LINEARIZED value
+  `srgb_to_linear(#hex)` (the same piecewise IEC transform as the bake's
+  `apply_linear_tint`), NOT the encoded sRGB float. WGSL currently carries the
+  encoded floats — bug, fix pending R8. Contract table (f32-nearest):
+    - `TINT_GRASS` (1) `#79C05A` → `(0.1912017, 0.5271151, 0.1022417)`
+    - `TINT_FOLIAGE` (2) `#59C93C` → `(0.0998987, 0.5840784, 0.0451862)`
+    - `TINT_WATER` (3) `#3F76E4` → `(0.0497066, 0.1811642, 0.7758222)`
+    - `TINT_DRY_FOLIAGE` (4) `#929786` → `(0.2874408, 0.3094689, 0.2383976)`
+  Golden test: render `grass_block_top` (`tint_mode = 1`) at full light (lit=15,
+  ao=3, UP face → multiplier 1.0) and byte-compare a texel against the CPU
+  reference `apply_linear_tint(grass_block_top texel, 0x79C05A)` — runtime and
+  bake must agree exactly.
+- **Engine-Added Bake Layers (reserved range, pinned)**: bake-appended engine
+  layers `1840` = birch_leaves_tinted, `1841` = spruce_leaves_tinted,
+  `1842` = lily_pad_tinted, `1843` = grass_block_side_overlay_composite
+  ([APPROX-RENDERING-09]); `total_layers = 1844` (< 2048 device cap). The
+  machine record is `texture_manifest.json` (`total_layers`,
+  `pre_tinted_layers`) — SPECS pins the reserved id range, not snapshot byte
+  sizes. Mip binaries 1..4 remain uploaded but unsampled until [APPROX-RENDERING-06]
+  is lifted (LOD0 pinned for v1).
+- **Colormap Texture Assets**:
+  - Extracted offline from release jar into `assets/textures/colormap/*.png`:
     - `grass.png` (256x256 RGB)
     - `foliage.png` (256x256 RGB)
     - `dry_foliage.png` (256x256 RGB)
