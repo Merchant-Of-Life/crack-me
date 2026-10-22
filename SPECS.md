@@ -544,17 +544,64 @@ flowchart TD
 - Right-handed coordinate system: $+X$ East, $+Y$ Up, $-Z$ North / forward (in Minecraft world coordinates: $+Z$ is South, $-Z$ is North).
 - Camera view matrix: `glam::Mat4::look_at_rh(eye, center, vec3(0.0, 1.0, 0.0))`.
 - Camera projection: `glam::Mat4::perspective_rh(fov_y, aspect, z_near, z_far)` with $[0, 1]$ depth.
-- Front Face & Culling:
+- **Pass 1 (Opaque & Cutout Pipeline)**:
   - `front_face: wgpu::FrontFace::Ccw`
-  - `cull_mode: Some(wgpu::Face::Back)`
-  - Consistent with the 24/24 CCW winding normal goldens locked in Step 3.
+  - `cull_mode: Some(wgpu::Face::Back)` (consistent with the 24/24 CCW winding normal goldens locked in Step 3)
+  - `depth_write_enabled: true`
+  - `depth_compare: wgpu::CompareFunction::Less`
+- **Pass 2 (Translucent Pipeline)**:
+  - `front_face: wgpu::FrontFace::Ccw`
+  - `cull_mode: None` (two-sided rendering: water surfaces, stained glass, and ice must be visible from both above and below/underwater)
+  - `depth_write_enabled: false`
+  - `depth_compare: wgpu::CompareFunction::Less`
+  - `blend: Some(wgpu::BlendState::ALPHA_BLENDING)`
+- **Depth Attachment**:
+  - Shared depth buffer format: `wgpu::TextureFormat::Depth24Plus`.
 
 ### 7. Tints & Dynamic Colormaps
 - Dynamic tinting evaluates in fragment shader:
   - `dry_foliage` flag (Word 1 bit 21 == 1) routes to dry foliage tint (`#929786` for `pale_oak_leaves`).
   - Otherwise `tint_mode`:
-    - `0`: None (`vec3(1.0, 1.0, 1.0)`).
-    - `1`: Grass colormap lookup / biome tint.
-    - `2`: Foliage colormap lookup / biome tint.
-    - `3`: Water tint (`#3F76E4` default biome water color).
+    - `0` (`TINT_NONE`): `vec3(1.0, 1.0, 1.0)`
+    - `1` (`TINT_GRASS`): Biome grass tint, defaulting to Plains `#79C05A` (`vec3(0.4745, 0.7529, 0.3529)`) [APPROX-RENDERING-07]
+    - `2` (`TINT_FOLIAGE`): Biome foliage tint, defaulting to Plains `#59C93C` (`vec3(0.3490, 0.7882, 0.2353)`) [APPROX-RENDERING-07]
+    - `3` (`TINT_WATER`): Biome water tint, defaulting to Plains `#3F76E4` (`vec3(0.2471, 0.4627, 0.8941)`) [APPROX-RENDERING-07]
+- **Colormap Texture Assets**:
+  - Extracted offline from release jar into `assets/textures/colormap/*.png`:
+    - `grass.png` (256x256 RGB)
+    - `foliage.png` (256x256 RGB)
+    - `dry_foliage.png` (256x256 RGB)
+
+### 8. Fragment Texture Contract, UV Mapping, & Chunk Partitioning
+- **Registry-Driven Chunk Layer Partitioning**:
+  `BlockStateEntry::render_layer(&self) -> u8` (row byte 30 / `pad[1]`) determines chunk mesh grouping:
+  - `LAYER_SOLID = 0`: Standard opaque cubes (stone, dirt, planks, etc.) and fluids (lava). Rendered in Pass 1 without alpha discard.
+  - `LAYER_CUTOUT_MIPPED = 1`: Leaves blocks. Rendered in Pass 1 with alpha cutoff 0.5.
+  - `LAYER_CUTOUT = 2`: 1-bit cutout blocks (copper grates, clear glass, doors, trapdoors, saplings, rails). Rendered in Pass 1 with alpha cutoff 0.5.
+  - `LAYER_TRANSLUCENT = 3`: Semitransparent blocks (stained glass, stained glass panes, ice, frosted ice, tinted glass, slime, honey, water). Rendered in Pass 2 with alpha blending.
+- **UV Axis Mapping Derivation**:
+  Derived directly from `mesher.rs` canonical corner order:
+  - `FACE_UP` (+Y, `normal_id = 0`): $U = x, V = z$
+  - `FACE_DOWN` (-Y, `normal_id = 1`): $U = x, V = z$
+  - `FACE_SOUTH` (+Z, `normal_id = 2`): $U = x, V = 1.0 - y$
+  - `FACE_NORTH` (-Z, `normal_id = 3`): $U = 1.0 - x, V = 1.0 - y$
+  - `FACE_EAST` (+X, `normal_id = 4`): $U = 1.0 - z, V = 1.0 - y$
+  - `FACE_WEST` (-X, `normal_id = 5`): $U = z, V = 1.0 - y$
+- **UV Rotation (`uv_rot`)**:
+  Applied after face axis mapping in 90° increments:
+  - `0`: $(u, v)$
+  - `1`: $(v, 1.0 - u)$
+  - `2`: $(1.0 - u, 1.0 - v)$
+  - `3`: $(1.0 - v, u)$
+- **Greedy Quad Tiling**:
+  Merged quads span $[u_0..u_1] \times [v_0..v_1]$ in local block coordinates. In the fragment shader:
+  $$U_{\text{tile}} = \text{fract}(U), \quad V_{\text{tile}} = \text{fract}(V)$$
+- **Explicit LOD0 Sampling [APPROX-RENDERING-06]**:
+  Textures sample at LOD 0 (`textureSampleLevel(t_diffuse, s_diffuse, uv, layer, 0.0)`) until anisotropic filtering and derivative MIP selection are implemented for 2D array textures.
+- **Color & Texture Formats**:
+  - `wgpu::TextureFormat::Rgba8UnormSrgb` for both Texture2DArray and Framebuffer / Headless Target.
+  - All shader lighting math executes in linear space; hardware sRGB conversion is utilized for decode and write.
+- **Device Limits & Headless Testing**:
+  - Adapter initialization requires `max_texture_array_layers >= 2048`.
+  - Adapter creation and limit checks have a dedicated unit-testable seam that runs headless without display or window requirements.
 
