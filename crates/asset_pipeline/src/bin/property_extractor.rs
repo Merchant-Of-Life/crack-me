@@ -534,14 +534,14 @@ fn classify_expr(expr: &str) -> Result<Option<J>, String> {
         return Ok(Some(json!({"kind": "prop_value", "prop": "level"})));
     }
 
-    // VaultState — VaultState$LightLevel: HALF_LIT=6 (inactive), LIT=12
-    if e.contains("VaultState") {
+    // VaultState (Blocks.java:236474) — VaultState.java:18-23, VaultState$LightLevel.java: HALF_LIT=6 (inactive), LIT=12
+    if e.contains("VaultState") || e.contains("VaultBlock.STATE") {
         return Ok(Some(json!({"kind": "prop_map", "prop": "vault_state",
             "map": {"inactive": 6, "active": 12, "unlocking": 12, "ejecting": 12}})));
     }
 
-    // TrialSpawnerState — per-state lightLevel from the enum constructor table
-    if e.contains("TrialSpawnerState") {
+    // TrialSpawnerState (Blocks.java:236066) — TrialSpawnerState.java:33-37 constructor table
+    if e.contains("TrialSpawnerState") || e.contains("TrialSpawnerBlock.STATE") {
         return Ok(Some(json!({"kind": "prop_map", "prop": "trial_spawner_state",
             "map": {"inactive": 0, "waiting_for_players": 4, "active": 8,
                     "waiting_for_reward_ejection": 8, "ejecting_reward": 8, "cooldown": 0}})));

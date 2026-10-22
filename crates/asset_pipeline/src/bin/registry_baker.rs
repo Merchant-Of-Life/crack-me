@@ -1459,6 +1459,24 @@ mod tests {
         assert_eq!(b.blocks["glowstone"].states[0].light_emission, 15);
         assert_eq!(b.blocks["glowstone"].states[0].light_filter, 15);
         assert_eq!(b.blocks["stone"].states[0].light_filter, 15);
+
+        // Vault: 32 states (4 facing x 2 ominous x 4 vault_state)
+        // Blocks.java:236474, VaultState.java:18-23, VaultState$LightLevel.java:
+        // INACTIVE -> HALF_LIT(6) [8 rows], ACTIVE/UNLOCKING/EJECTING -> LIT(12) [24 rows]
+        let vault_rows = &b.blocks["vault"].states;
+        assert_eq!(vault_rows.len(), 32);
+        assert_eq!(vault_rows.iter().filter(|s| s.light_emission == 6).count(), 8, "vault inactive rows");
+        assert_eq!(vault_rows.iter().filter(|s| s.light_emission == 12).count(), 24, "vault lit rows");
+
+        // Trial spawner: 12 states (2 ominous x 6 trial_spawner_state)
+        // Blocks.java:236066, TrialSpawnerState.java:33-37:
+        // inactive/cooldown -> 0 [4 rows], waiting_for_players -> 4 [2 rows],
+        // active/waiting_for_reward_ejection/ejecting_reward -> 8 [6 rows]
+        let ts_rows = &b.blocks["trial_spawner"].states;
+        assert_eq!(ts_rows.len(), 12);
+        assert_eq!(ts_rows.iter().filter(|s| s.light_emission == 0).count(), 4, "trial_spawner unlit rows");
+        assert_eq!(ts_rows.iter().filter(|s| s.light_emission == 4).count(), 2, "trial_spawner waiting_for_players rows");
+        assert_eq!(ts_rows.iter().filter(|s| s.light_emission == 8).count(), 6, "trial_spawner active/reward rows");
     }
 
     #[test]

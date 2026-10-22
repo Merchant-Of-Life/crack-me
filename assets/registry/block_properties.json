@@ -822,6 +822,30 @@
       "kind": "constant",
       "value": 14
     },
+    "trial_spawner": {
+      "decl": "Blocks.java:236066",
+      "kind": "prop_map",
+      "map": {
+        "active": 8,
+        "cooldown": 0,
+        "ejecting_reward": 8,
+        "inactive": 0,
+        "waiting_for_players": 4,
+        "waiting_for_reward_ejection": 8
+      },
+      "prop": "trial_spawner_state"
+    },
+    "vault": {
+      "decl": "Blocks.java:236474",
+      "kind": "prop_map",
+      "map": {
+        "active": 12,
+        "ejecting": 12,
+        "inactive": 6,
+        "unlocking": 12
+      },
+      "prop": "vault_state"
+    },
     "verdant_froglight": {
       "decl": "Blocks.java:234546",
       "kind": "constant",
