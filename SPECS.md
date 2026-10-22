@@ -696,6 +696,23 @@ flowchart TD
   reuse the headless limit discipline (2048 texture-array layers in
   `required_limits` + adapter validation). Startup prints adapter name,
   backend, and selected surface format.
+- **Viewer Control Contract (Step 5A, user-approved plan; pinned by review
+  2026-10-22 — anchors the voxel_viewer bin)**:
+  - WASD = horizontal walk; `Space` = ASCEND (pinned — never dampen), `LShift`
+    (left or right) = descend, `LControl` = sprint multiplier.
+  - Click = grab pointer (`CursorGrabMode::Locked`, cursor hidden); `Esc` =
+    release the grab; a second `Esc` while ungrabbed exits the app.
+  - Look input = pointer deltas received while grabbed; MUST work on Wayland
+    (review desktop is Hyprland) — do not depend on button-held drag-look.
+  - Title telemetry every 0.5 s: FPS, dampen, tick; startup line prints
+    adapter | backend | surface format | FPS (one line).
+  - Dampen keys: `N` = +1, `M` = −1, clamped 0..=15.
+  - Showcase world: 6×6 section grid; ONLY the inner 4×4 sections mesh, each
+    ONLY after all 8 horizontal neighbors exist (wait-for-8 halo gate — the
+    step-5 remesh wiring foundation). Excluded blocks: torch, leaf_litter,
+    lily_pad. Required content: glowstone, lit furnace (animated front), lava
+    pool (76-tick animated fluid), magma (24-tick animated), clear + stained
+    glass, ice vs packed_ice peak, sideways logs on both horizontal axes.
 - **Vanilla Layer Dispatch — VERIFIED (review 2026-10-22, `ChunkSectionLayer.java` release-jar decompile)**:
   vanilla 26.3 has THREE section layers — `SOLID` / `CUTOUT` / `TRANSLUCENT`.
   `ChunkSectionLayer.byTransparency(Transparency)` maps the per-quad material
