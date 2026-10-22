@@ -604,6 +604,17 @@ flowchart TD
   Plains until per-voxel biome tinting lands, whereupon the composite resolves
   to a runtime decal quad. The composite bake must remain registry-driven —
   no hand-typed tables. Verify via a headless grass-block side golden.
+- **Snowy Grass Top Tint — REVIEW FINDING (2026-10-22), REQUIREMENT R5b**: the
+  snowy state (`grass_block[snowy=true]`) models its top through the vanilla
+  `cube_bottom_top` chain (`top = grass_block_top`), which carries NO
+  `tintindex`; the baker's "no tintindex → freeze TINT_NONE" rule therefore
+  bakes tint 0 on the snowy top (binary-verified). Vanilla applies the grass
+  tint at BLOCK level for `grass_block_top`-carrying faces regardless of the
+  snowy state (client BlockColors registration, not model data), so the snowy
+  top must be biome-tinted too. Required fix: decompile-verify the 26.3
+  BlockColors/GrassBlock registration path first, then bake the block-level
+  tint on that face. v1 impact is small (snowy grass ≈ never in Plains) —
+  schedule with the next registry round, do not silently forget.
 
 ### 8. Fragment Texture Contract, UV Mapping, & Chunk Partitioning
 - **Registry-Driven Chunk Layer Partitioning**:
