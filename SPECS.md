@@ -449,7 +449,10 @@ flowchart TD
 - **Pass 1: Opaque + Cutout (Single Pass)**:
   - Depth write enabled: `depth_write_enabled: true`, `depth_compare: wgpu::CompareFunction::LessEqual`.
   - Blend state: none (`write_mask: ALL`).
-  - Fragment shader: cutout alpha discard `if (color.a < 0.1) { discard; }`.
+  - Fragment shader: cutout alpha discard uses the vanilla two-tier thresholds —
+    $0.5$ for terrain cutout (`ALPHA_CUTOUT_THRESHOLD_CUTOUT_TERRAIN`,
+    `RenderPipelines.java:25`); the $0.1$ default is reserved for future
+    non-terrain draws. `LessEqual` in this section is authoritative — §6 agrees.
   - Renders all solid blocks and cutout geometry (leaves, saplings, grates, flowers) into the depth buffer in a single pass.
 - **Pass 2: Translucent (Second Pass)**:
   - Depth write disabled: `depth_write_enabled: false`, `depth_compare: wgpu::CompareFunction::LessEqual`.
@@ -457,7 +460,11 @@ flowchart TD
   - Renders all translucent geometry (water, stained glass, ice).
 - **V1 Approximations**:
   - `[APPROX-RENDERING-01]` **Translucent Sorting Skip**: Translucent quads and sections are rendered without per-quad depth sorting.
-  - `[APPROX-RENDERING-02]` **Cutout Alpha Threshold**: Fixed at `alpha < 0.1` in fragment shader.
+  - `[APPROX-RENDERING-02]` **Cutout Alpha Threshold** — VERIFIED (review
+    2026-10-22, `RenderPipelines.java:24-25` constant pool, javap):
+    `ALPHA_CUTOUT_THRESHOLD_CUTOUT_TERRAIN = 0.5F` (terrain cutout — ours),
+    `ALPHA_CUTOUT_THRESHOLD_DEFAULT = 0.1F` (non-terrain, future). Jar-exact,
+    no longer an approximation.
   - `[APPROX-RENDERING-03..05]`: lighting approximations pinned in §6.5 (day_factor scalar ramp, ambient floor, AO curve).
 
 ### 3. Per-Section World Placement (`SectionInstance`)
@@ -548,15 +555,25 @@ flowchart TD
   - `front_face: wgpu::FrontFace::Ccw`
   - `cull_mode: Some(wgpu::Face::Back)` (consistent with the 24/24 CCW winding normal goldens locked in Step 3)
   - `depth_write_enabled: true`
-  - `depth_compare: wgpu::CompareFunction::Less`
+  - `depth_compare: wgpu::CompareFunction::LessEqual`
 - **Pass 2 (Translucent Pipeline)**:
   - `front_face: wgpu::FrontFace::Ccw`
   - `cull_mode: None` (two-sided rendering: water surfaces, stained glass, and ice must be visible from both above and below/underwater)
   - `depth_write_enabled: false`
-  - `depth_compare: wgpu::CompareFunction::Less`
+  - `depth_compare: wgpu::CompareFunction::LessEqual`
   - `blend: Some(wgpu::BlendState::ALPHA_BLENDING)`
 - **Depth Attachment**:
-  - Shared depth buffer format: `wgpu::TextureFormat::Depth24Plus`.
+  - Shared depth buffer format: `wgpu::TextureFormat::Depth24Plus`, cleared to `1.0` (all passes).
+- **Vanilla Depth Direction — VERIFIED (review 2026-10-22, release-jar
+  `DepthStencilState` + `RenderPipelines` decompiles, javap `<clinit>`)**:
+  vanilla 26.3 renders terrain REVERSED-Z: `DepthStencilState.DEFAULT` =
+  `(CompareOp.GREATER_THAN_OR_EQUAL, writeDepth=true)` and the terrain snippet
+  chain (TERRAIN → SOLID/CUTOUT/TRANSLUCENT_TERRAIN) inherits it. Our
+  conventional mapping (clear `1.0`, `LessEqual`) is the same inclusive
+  equal-depth test under normal orientation and is labeled
+  [APPROX-RENDERING-08] (a depth-convention deviation, not an occlusion-semantics one). `LessEqual` is REQUIRED — the plain `Less`
+  written into this section by 7710121 was an unreviewed regression against
+  §2; never alter pipeline semantics without a jar citation.
 
 ### 7. Tints & Dynamic Colormaps
 - Dynamic tinting evaluates in fragment shader:
@@ -566,27 +583,61 @@ flowchart TD
     - `1` (`TINT_GRASS`): Biome grass tint, defaulting to Plains `#79C05A` (`vec3(0.4745, 0.7529, 0.3529)`) [APPROX-RENDERING-07]
     - `2` (`TINT_FOLIAGE`): Biome foliage tint, defaulting to Plains `#59C93C` (`vec3(0.3490, 0.7882, 0.2353)`) [APPROX-RENDERING-07]
     - `3` (`TINT_WATER`): Biome water tint, defaulting to Plains `#3F76E4` (`vec3(0.2471, 0.4627, 0.8941)`) [APPROX-RENDERING-07]
-- **Colormap Texture Assets**:
-  - Extracted offline from release jar into `assets/textures/colormap/*.png`:
+  - **Colormap Texture Assets**:
+    - Extracted offline from release jar into `assets/textures/colormap/*.png`:
     - `grass.png` (256x256 RGB)
     - `foliage.png` (256x256 RGB)
     - `dry_foliage.png` (256x256 RGB)
+    - Byte-identity VERIFIED (review 2026-10-22): all three are byte-equal to the
+      release jar's own `assets/minecraft/textures/colormap/*.png`; the `snap.7z`
+      staging path is provenance-neutral for these assets.
+- **Grass Block Side Overlay — REVIEW FINDING (2026-10-22), REQUIREMENT R5**:
+  vanilla composites a coplanar tinted `grass_block_side_overlay` rim over the
+  dirt side texture, tinted with the SAME grass tint as the top face. The
+  current bake references plain `grass_block_side` (dirt) for grass_block's
+  four side normals — the rim is silently missing. Required offline fix:
+  composite the overlay into a new bake-added layer using the
+  [APPROX-RENDERING-07] Plains grass tint constant, remap grass_block's
+  side-face texture references, and set those faces' tint mode to 0 (the rim's
+  tint is frozen inside the composite; runtime re-tinting would recolor the
+  dirt pixels too). Labeled [APPROX-RENDERING-09]: the rim stays frozen at
+  Plains until per-voxel biome tinting lands, whereupon the composite resolves
+  to a runtime decal quad. The composite bake must remain registry-driven —
+  no hand-typed tables. Verify via a headless grass-block side golden.
 
 ### 8. Fragment Texture Contract, UV Mapping, & Chunk Partitioning
 - **Registry-Driven Chunk Layer Partitioning**:
   `BlockStateEntry::render_layer(&self) -> u8` (row byte 30 / `pad[1]`) determines chunk mesh grouping:
   - `LAYER_SOLID = 0`: Standard opaque cubes (stone, dirt, planks, etc.) and fluids (lava). Rendered in Pass 1 without alpha discard.
-  - `LAYER_CUTOUT_MIPPED = 1`: Leaves blocks. Rendered in Pass 1 with alpha cutoff 0.5.
-  - `LAYER_CUTOUT = 2`: 1-bit cutout blocks (copper grates, clear glass, doors, trapdoors, saplings, rails). Rendered in Pass 1 with alpha cutoff 0.5.
+  - `LAYER_CUTOUT_MIPPED = 1`: Leaves blocks. Rendered in Pass 1 with [APPROX-RENDERING-02] discard.
+  - `LAYER_CUTOUT = 2`: 1-bit cutout blocks (copper grates, clear glass, doors, trapdoors, saplings, rails). Rendered in Pass 1 with [APPROX-RENDERING-02] discard.
   - `LAYER_TRANSLUCENT = 3`: Semitransparent blocks (stained glass, stained glass panes, ice, frosted ice, tinted glass, slime, honey, water). Rendered in Pass 2 with alpha blending.
-- **UV Axis Mapping Derivation**:
-  Derived directly from `mesher.rs` canonical corner order:
-  - `FACE_UP` (+Y, `normal_id = 0`): $U = x, V = z$
-  - `FACE_DOWN` (-Y, `normal_id = 1`): $U = x, V = z$
-  - `FACE_SOUTH` (+Z, `normal_id = 2`): $U = x, V = 1.0 - y$
-  - `FACE_NORTH` (-Z, `normal_id = 3`): $U = 1.0 - x, V = 1.0 - y$
-  - `FACE_EAST` (+X, `normal_id = 4`): $U = 1.0 - z, V = 1.0 - y$
-  - `FACE_WEST` (-X, `normal_id = 5`): $U = z, V = 1.0 - y$
+- **Vanilla Layer Dispatch — VERIFIED (review 2026-10-22, `ChunkSectionLayer.java` release-jar decompile)**:
+  vanilla 26.3 has THREE section layers — `SOLID` / `CUTOUT` / `TRANSLUCENT`.
+  `ChunkSectionLayer.byTransparency(Transparency)` maps the per-quad material
+  aggregate: `hasTranslucent → TRANSLUCENT`, `hasTransparent → CUTOUT`, else
+  `SOLID`; the old fourth `cutout_mipped` section member is FOLDED into
+  `CUTOUT`. Our 4-value byte is an engine-side refinement preserving
+  leaves-mip semantics for a future mip-aware sampler; its pass behavior equals
+  `LAYER_CUTOUT`'s. The offline per-block classification was validated against
+  the per-quad Transparency truth for every CUBE/fluid row (review delta
+  script: 16 CUBE deltas — 14 leaves `cutout_mipped` vs `cutout`, the
+  test-only block, and grass_block's overlay below); VALIDATION IS COMPLETE
+  FOR V1. Known undershoot: blocks whose registration properties live in
+  helper classes rather than inline (regex-visible) — `torch` is currently
+  SOLID where vanilla is CUTOUT. Before complex-mesh support consumes layer
+  bytes, fix the classification or flag every such block via the
+  `render_layers_breakdown` report (reviewable listings).
+- **UV Axis Mapping — VERIFIED (review 2026-10-22, release-jar `FaceBakery.defaultFaceUV(from, to, Direction)` decompile)**:
+  Orientation anchor is vanilla `defaultFaceUV`, normalized below (texture-space $V$ grows downward); corner enumeration stays with `mesher.rs`
+  canonical corner order:
+  - `FACE_UP` (+Y, `normal_id = 0`): $U = x, V = z$ — vanilla case UP: `(x, z)`
+  - `FACE_DOWN` (-Y, `normal_id = 1`): $U = x, V = 1.0 - z$ — vanilla case DOWN: `(x, 16.0F - z)`; MIRRORED along $z$ versus UP (the `V = z` value
+    written by 7710121 was wrong and is retired here)
+  - `FACE_SOUTH` (+Z, `normal_id = 2`): $U = x, V = 1.0 - y$ — case SOUTH: `(x, 16.0F - y)`
+  - `FACE_NORTH` (-Z, `normal_id = 3`): $U = 1.0 - x, V = 1.0 - y$ — case NORTH: `(16.0F - x, 16.0F - y)`
+  - `FACE_EAST` (+X, `normal_id = 4`): $U = 1.0 - z, V = 1.0 - y$ — case EAST: `(16.0F - z, 16.0F - y)`
+  - `FACE_WEST` (-X, `normal_id = 5`): $U = z, V = 1.0 - y$ — case WEST: `(z, 16.0F - y)`
 - **UV Rotation (`uv_rot`)**:
   Applied after face axis mapping in 90° increments:
   - `0`: $(u, v)$
