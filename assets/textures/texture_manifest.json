@@ -1,10 +1,11 @@
 {
-  "total_layers": 1843,
+  "total_layers": 1844,
   "layer_dimension": 16,
   "mip_levels": 5,
   "timeline_total_u32": 8548,
   "pre_tinted_layers": {
     "birch_leaves_tinted": 1840,
+    "grass_block_side_overlay_composite": 1843,
     "lily_pad_tinted": 1842,
     "spruce_leaves_tinted": 1841
   },
@@ -5676,6 +5677,17 @@
     },
     "grass_block_side_overlay": {
       "base_layer": 628,
+      "original_width": 16,
+      "original_height": 16,
+      "animated": false,
+      "frame_count": 1,
+      "interpolate": false,
+      "timeline_offset": 0,
+      "timeline_len": 0,
+      "has_mcmeta": false
+    },
+    "grass_block_side_overlay_composite": {
+      "base_layer": 1843,
       "original_width": 16,
       "original_height": 16,
       "animated": false,

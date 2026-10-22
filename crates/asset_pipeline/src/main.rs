@@ -504,6 +504,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Composite grass_block_side_overlay over grass_block_side with Plains grass tint 0x79C05A [APPROX-RENDERING-07, APPROX-RENDERING-09]
+    let overlay_composite_name = "grass_block_side_overlay_composite";
+    if let (Some(dirt_16), Some(overlay_16)) = (
+        base_frames_16x16.get("grass_block_side"),
+        base_frames_16x16.get("grass_block_side_overlay"),
+    ) {
+        let tinted_overlay = apply_linear_tint(overlay_16, 0x79C05A);
+        let mut composite = dirt_16.clone();
+        for (comp_chunk, over_chunk) in composite.chunks_exact_mut(4).zip(tinted_overlay.chunks_exact(4)) {
+            let over_a = over_chunk[3];
+            if over_a == 255 {
+                comp_chunk.copy_from_slice(over_chunk);
+            } else if over_a > 0 {
+                let a = over_a as f32 / 255.0;
+                comp_chunk[0] = (over_chunk[0] as f32 * a + comp_chunk[0] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[1] = (over_chunk[1] as f32 * a + comp_chunk[1] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[2] = (over_chunk[2] as f32 * a + comp_chunk[2] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[3] = 255;
+            }
+        }
+        let target_png_path = out_blocks.join(format!("{}.png", overlay_composite_name));
+        if let Some(r_img) = RgbaImage::from_raw(16, 16, composite.clone()) {
+            let _ = r_img.save_with_format(&target_png_path, ImageFormat::Png);
+        }
+        mip0_layers_rgba8.extend_from_slice(&composite);
+        pre_tinted_layers.insert(overlay_composite_name.to_string(), current_layer);
+        manifest_entries.insert(
+            overlay_composite_name.to_string(),
+            TextureEntry {
+                base_layer: current_layer,
+                original_width: 16,
+                original_height: 16,
+                animated: false,
+                frame_count: 1,
+                interpolate: false,
+                timeline_offset: 0,
+                timeline_len: 0,
+                has_mcmeta: false,
+            },
+        );
+        current_layer += 1;
+    } else {
+        eprintln!("Warning: Could not find grass_block_side or grass_block_side_overlay to composite");
+    }
+
     let total_layers = current_layer;
     println!("Total layers in 2D array texture: {} (under 2048 limit)", total_layers);
     println!("Generating 4 offline mipmap levels in linear color space with coverage preservation...");

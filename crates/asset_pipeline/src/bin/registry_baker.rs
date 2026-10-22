@@ -255,6 +255,7 @@ impl Models {
 struct FaceData {
     texture: Value,
     rotation: i32,
+    tintindex: Option<i64>,
 }
 
 fn face_map_of_element(elem: &Value) -> BTreeMap<String, FaceData> {
@@ -268,11 +269,13 @@ fn face_map_of_element(elem: &Value) -> BTreeMap<String, FaceData> {
                 .and_then(|c| c.as_str())
                 .unwrap_or(fname.as_str());
             let rot = fval.get("rotation").and_then(|r| r.as_i64()).unwrap_or(0) as i32;
+            let tintindex = fval.get("tintindex").and_then(|t| t.as_i64());
             out.insert(
                 dir.to_string(),
                 FaceData {
                     texture: fval.get("texture").cloned().unwrap_or(Value::Null),
                     rotation: rot,
+                    tintindex,
                 },
             );
         }
@@ -1087,6 +1090,15 @@ fn cube_state_row(
             }
         }
     }
+    // collect overlay element faces when models have multi-element stacked faces (e.g. grass_block side overlay)
+    let mut overlay_map: BTreeMap<String, FaceData> = BTreeMap::new();
+    if rm.elements.len() > 1 {
+        for e in &rm.elements[1..] {
+            for (k, v) in face_map_of_element(e) {
+                overlay_map.insert(k, v);
+            }
+        }
+    }
     for (w_idx, m_idx) in inv.iter().enumerate() {
         if *m_idx == usize::MAX {
             return Err(format!("{}: rotation {} {} dropped face {}", block, vv.x, vv.y, w_idx).into());
@@ -1095,17 +1107,40 @@ fn cube_state_row(
         let fd = face_map
             .get(face_name)
             .ok_or_else(|| format!("{}: model {} lacks cullface {}", block, vv.model, face_name))?;
-        let tex = models
-            .deref_texture(&fd.texture, &rm.textures)
-            .ok_or_else(|| format!("{}: unresolved texture for cullface {}", block, face_name))?;
-        let layer = layer_of(&tex)
-            .ok_or_else(|| format!("{}: texture {} not in manifest (golden: unresolved == 0)", block, tex))?;
 
-        // If the block has a fixed tint baked offline, point the face at the pre-tinted layer.
-        let final_layer = match tint {
-            TintDecision::Swap(swap) => swap as u16,
-            _ => layer,
+        // Check if an overlay element covers this face with a pre-baked composite [APPROX-RENDERING-09]
+        let mut face_layer = None;
+        let mut face_tint_mode = tint_mode;
+        if let Some(over_fd) = overlay_map.get(face_name) {
+            if let Some(over_tex) = models.deref_texture(&over_fd.texture, &rm.textures) {
+                let comp_name = format!("{}_composite", over_tex);
+                if let Some(comp_layer) = layer_of(&comp_name) {
+                    face_layer = Some(comp_layer);
+                    // Rim tint is frozen inside the composite; runtime re-tinting would recolor dirt
+                    face_tint_mode = TINT_NONE;
+                }
+            }
+        }
+
+        let final_layer = if let Some(fl) = face_layer {
+            fl
+        } else {
+            let tex = models
+                .deref_texture(&fd.texture, &rm.textures)
+                .ok_or_else(|| format!("{}: unresolved texture for cullface {}", block, face_name))?;
+            let layer = layer_of(&tex)
+                .ok_or_else(|| format!("{}: texture {} not in manifest (golden: unresolved == 0)", block, tex))?;
+            match tint {
+                TintDecision::Swap(swap) => swap as u16,
+                _ => layer,
+            }
         };
+
+        // If face has no overlay and no tintindex in the model, freeze tint_mode to TINT_NONE (e.g. grass_block bottom/dirt)
+        if face_layer.is_none() && fd.tintindex.is_none() {
+            face_tint_mode = TINT_NONE;
+        }
+
         let uv_rot = if fd.rotation % 90 == 0 {
             (fd.rotation.rem_euclid(360) / 90) as u8
         } else {
@@ -1113,7 +1148,7 @@ fn cube_state_row(
         };
         entry.faces[w_idx] = FaceInfo {
             base_layer: final_layer,
-            tint_mode,
+            tint_mode: face_tint_mode,
             uv_rot,
         };
     }
@@ -1334,6 +1369,19 @@ mod tests {
             "petals are NOT grass-tinted (BlockColors: BLANK first layer)");
         let grass = &b.blocks["grass_block"];
         assert_eq!(grass.states[0].faces[FACE_UP].tint_mode, TINT_GRASS);
+        assert_eq!(grass.states[0].faces[FACE_DOWN].tint_mode, TINT_NONE);
+        let layers = manifest_layers();
+        let comp_layer = layers["grass_block_side_overlay_composite"] as u16;
+        for f in [FACE_NORTH, FACE_SOUTH, FACE_EAST, FACE_WEST] {
+            assert_eq!(
+                grass.states[0].faces[f].base_layer, comp_layer,
+                "grass_block side face must point to pre-baked composite [APPROX-RENDERING-09]"
+            );
+            assert_eq!(
+                grass.states[0].faces[f].tint_mode, TINT_NONE,
+                "grass_block side face must have tint_mode 0 to prevent recoloring dirt [APPROX-RENDERING-09]"
+            );
+        }
     }
 
     #[test]

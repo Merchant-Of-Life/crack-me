@@ -1196,4 +1196,25 @@ mod tests {
         let pale_oak_leaves_state = reg.get_state(pale_oak_leaves.state_start).unwrap();
         assert_eq!(pale_oak_leaves_state.render_layer(), LAYER_CUTOUT_MIPPED, "pale_oak_leaves must be LAYER_CUTOUT_MIPPED");
     }
+
+    #[test]
+    fn test_grass_block_side_composite_golden() {
+        let reg = load_oracle_registry();
+        let grass = reg.get_block("grass_block").expect("grass_block in registry");
+        let state = reg.get_state(grass.state_start).unwrap();
+
+        // 1. Top face is grass-tinted (TINT_GRASS = 1)
+        assert_eq!(state.faces[FACE_UP].tint_mode, 1, "top face must be TINT_GRASS");
+
+        // 2. Bottom face is dirt (TINT_NONE = 0)
+        assert_eq!(state.faces[FACE_DOWN].tint_mode, 0, "bottom face must be TINT_NONE");
+
+        // 3. Side faces must use the bake-added composite layer with tint_mode = 0 [APPROX-RENDERING-09]
+        let side_layer = state.faces[FACE_NORTH].base_layer;
+        assert_eq!(side_layer, 1843, "grass_block side face must point to composite layer 1843");
+        for f in [FACE_NORTH, FACE_SOUTH, FACE_EAST, FACE_WEST] {
+            assert_eq!(state.faces[f].base_layer, side_layer, "all 4 side faces must match composite layer");
+            assert_eq!(state.faces[f].tint_mode, 0, "side faces must have tint_mode 0 to prevent recoloring dirt [APPROX-RENDERING-09]");
+        }
+    }
 }
