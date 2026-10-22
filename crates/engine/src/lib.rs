@@ -2,12 +2,16 @@ use bytemuck::{Pod, Zeroable};
 
 pub mod bfs;
 pub mod light;
+pub mod mesher;
 pub mod registry;
 
 pub use bfs::{recompute_light_column, LightComputeResult, NeighborChunkLights, CARDINAL_DIRECTIONS};
 pub use light::{
     section_index_to_coords, section_voxel_index, ChunkLightColumn, ChunkVoxelColumn, LightSection,
     MAX_Y, MIN_Y, SECTION_COUNT, SECTION_SIZE, SECTION_VOXELS,
+};
+pub use mesher::{
+    HorizontalNeighbors, OptionalHorizontalNeighbors, SectionHalo, HALO_SIZE, HALO_VOXELS,
 };
 pub use registry::{
     BlockIndexEntry, BlockRegistry, BlockStateEntry, FaceInfo, RegistryError, FACE_DOWN, FACE_EAST,
@@ -564,5 +568,183 @@ mod tests {
         assert!(v.dry_foliage());
         v.set_dry_foliage(false);
         assert!(!v.dry_foliage());
+    }
+
+    #[test]
+    fn test_halo_indexing_and_bounds() {
+        let mut halo = SectionHalo::new();
+        // Check corners and center
+        halo.set_voxel(-1, -1, -1, 101);
+        halo.set_packed_light(-1, -1, -1, 0x12);
+        assert_eq!(halo.get_voxel(-1, -1, -1), 101);
+        assert_eq!(halo.get_packed_light(-1, -1, -1), 0x12);
+        assert_eq!(halo.get_sky_light(-1, -1, -1), 1);
+        assert_eq!(halo.get_block_light(-1, -1, -1), 2);
+
+        halo.set_voxel(16, 16, 16, 202);
+        halo.set_packed_light(16, 16, 16, 0xEF);
+        assert_eq!(halo.get_voxel(16, 16, 16), 202);
+        assert_eq!(halo.get_packed_light(16, 16, 16), 0xEF);
+        assert_eq!(halo.get_sky_light(16, 16, 16), 14);
+        assert_eq!(halo.get_block_light(16, 16, 16), 15);
+
+        halo.set_voxel(0, 0, 0, 303);
+        assert_eq!(halo.get_voxel(0, 0, 0), 303);
+    }
+
+    #[test]
+    fn test_halo_wait_for_8_contract() {
+        let cv = ChunkVoxelColumn::new(0);
+        let cl = ChunkLightColumn::default();
+
+        let mut opt = OptionalHorizontalNeighbors::default();
+        assert!(opt.as_complete().is_none(), "empty neighbors must return None");
+
+        opt.west = Some((&cv, &cl));
+        opt.east = Some((&cv, &cl));
+        opt.north = Some((&cv, &cl));
+        opt.south = Some((&cv, &cl));
+        opt.nw = Some((&cv, &cl));
+        opt.ne = Some((&cv, &cl));
+        opt.sw = Some((&cv, &cl));
+        assert!(opt.as_complete().is_none(), "7/8 neighbors present must return None");
+
+        opt.se = Some((&cv, &cl));
+        assert!(opt.as_complete().is_some(), "all 8 neighbors present must return Some");
+    }
+
+    #[test]
+    fn test_halo_8_neighbors_sampling_and_clamps() {
+        let air = 23u16;
+        let mut center_v = ChunkVoxelColumn::new(air);
+        let mut center_l = ChunkLightColumn::default();
+
+        let mut west_v = ChunkVoxelColumn::new(air);
+        let mut west_l = ChunkLightColumn::default();
+
+        let mut east_v = ChunkVoxelColumn::new(air);
+        let mut east_l = ChunkLightColumn::default();
+
+        let mut north_v = ChunkVoxelColumn::new(air);
+        let mut north_l = ChunkLightColumn::default();
+
+        let mut south_v = ChunkVoxelColumn::new(air);
+        let mut south_l = ChunkLightColumn::default();
+
+        let mut nw_v = ChunkVoxelColumn::new(air);
+        let mut nw_l = ChunkLightColumn::default();
+
+        let mut ne_v = ChunkVoxelColumn::new(air);
+        let mut ne_l = ChunkLightColumn::default();
+
+        let mut sw_v = ChunkVoxelColumn::new(air);
+        let mut sw_l = ChunkLightColumn::default();
+
+        let mut se_v = ChunkVoxelColumn::new(air);
+        let mut se_l = ChunkLightColumn::default();
+
+        // Target test section: section 1 (Y in [-48, -32), world_y for local 0 is -48)
+        let sec_idx = 1;
+        let y_test = -48; // rel_y = 0
+
+        // Interior
+        center_v.set_state(5, y_test, 5, 500);
+        center_l.set_packed_light(5, y_test, 5, 0x55);
+
+        // Cardinal West (-X: rel_x = -1, z = 7) -> sampled from West chunk (15, y, 7)
+        west_v.set_state(15, y_test, 7, 601);
+        west_l.set_packed_light(15, y_test, 7, 0x61);
+
+        // Cardinal East (+X: rel_x = 16, z = 7) -> sampled from East chunk (0, y, 7)
+        east_v.set_state(0, y_test, 7, 602);
+        east_l.set_packed_light(0, y_test, 7, 0x62);
+
+        // Cardinal North (-Z: x = 7, rel_z = -1) -> sampled from North chunk (7, y, 15)
+        north_v.set_state(7, y_test, 15, 603);
+        north_l.set_packed_light(7, y_test, 15, 0x63);
+
+        // Cardinal South (+Z: x = 7, rel_z = 16) -> sampled from South chunk (7, y, 0)
+        south_v.set_state(7, y_test, 0, 604);
+        south_l.set_packed_light(7, y_test, 0, 0x64);
+
+        // Diagonal NW (rel_x = -1, rel_z = -1) -> NW chunk (15, y, 15)
+        nw_v.set_state(15, y_test, 15, 701);
+        nw_l.set_packed_light(15, y_test, 15, 0x71);
+
+        // Diagonal NE (rel_x = 16, rel_z = -1) -> NE chunk (0, y, 15)
+        ne_v.set_state(0, y_test, 15, 702);
+        ne_l.set_packed_light(0, y_test, 15, 0x72);
+
+        // Diagonal SW (rel_x = -1, rel_z = 16) -> SW chunk (15, y, 0)
+        sw_v.set_state(15, y_test, 0, 703);
+        sw_l.set_packed_light(15, y_test, 0, 0x73);
+
+        // Diagonal SE (rel_x = 16, rel_z = 16) -> SE chunk (0, y, 0)
+        se_v.set_state(0, y_test, 0, 704);
+        se_l.set_packed_light(0, y_test, 0, 0x74);
+
+        let neighbors = HorizontalNeighbors {
+            west: (&west_v, &west_l),
+            east: (&east_v, &east_l),
+            north: (&north_v, &north_l),
+            south: (&south_v, &south_l),
+            nw: (&nw_v, &nw_l),
+            ne: (&ne_v, &ne_l),
+            sw: (&sw_v, &sw_l),
+            se: (&se_v, &se_l),
+        };
+
+        let mut halo = SectionHalo::new();
+        halo.populate(sec_idx, &center_v, &center_l, &neighbors, air);
+
+        // Verify interior
+        assert_eq!(halo.get_voxel(5, 0, 5), 500);
+        assert_eq!(halo.get_packed_light(5, 0, 5), 0x55);
+
+        // Verify cardinals
+        assert_eq!(halo.get_voxel(-1, 0, 7), 601);
+        assert_eq!(halo.get_packed_light(-1, 0, 7), 0x61);
+
+        assert_eq!(halo.get_voxel(16, 0, 7), 602);
+        assert_eq!(halo.get_packed_light(16, 0, 7), 0x62);
+
+        assert_eq!(halo.get_voxel(7, 0, -1), 603);
+        assert_eq!(halo.get_packed_light(7, 0, -1), 0x63);
+
+        assert_eq!(halo.get_voxel(7, 0, 16), 604);
+        assert_eq!(halo.get_packed_light(7, 0, 16), 0x64);
+
+        // Verify 4 diagonals
+        assert_eq!(halo.get_voxel(-1, 0, -1), 701);
+        assert_eq!(halo.get_packed_light(-1, 0, -1), 0x71);
+
+        assert_eq!(halo.get_voxel(16, 0, -1), 702);
+        assert_eq!(halo.get_packed_light(16, 0, -1), 0x72);
+
+        assert_eq!(halo.get_voxel(-1, 0, 16), 703);
+        assert_eq!(halo.get_packed_light(-1, 0, 16), 0x73);
+
+        assert_eq!(halo.get_voxel(16, 0, 16), 704);
+        assert_eq!(halo.get_packed_light(16, 0, 16), 0x74);
+
+        // Verify Section 0 bottom floor clamp (y < -64)
+        let mut halo_bottom = SectionHalo::new();
+        halo_bottom.populate(0, &center_v, &center_l, &neighbors, air);
+        for z in -1..=16 {
+            for x in -1..=16 {
+                assert_eq!(halo_bottom.get_voxel(x, -1, z), air, "floor voxel clamp");
+                assert_eq!(halo_bottom.get_packed_light(x, -1, z), 0x00, "floor light clamp");
+            }
+        }
+
+        // Verify Section 23 top ceiling clamp (y >= 320)
+        let mut halo_top = SectionHalo::new();
+        halo_top.populate(23, &center_v, &center_l, &neighbors, air);
+        for z in -1..=16 {
+            for x in -1..=16 {
+                assert_eq!(halo_top.get_voxel(x, 16, z), air, "ceiling voxel clamp");
+                assert_eq!(halo_top.get_packed_light(x, 16, z), 0xF0, "ceiling light clamp (sky 15)");
+            }
+        }
     }
 }
