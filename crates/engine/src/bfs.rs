@@ -41,8 +41,8 @@ pub const CARDINAL_DIRECTIONS: [(i32, i32, i32); 6] = [
 /// Neighbor chunk columns for cross-chunk boundary light seeding.
 #[derive(Default)]
 pub struct NeighborChunkLights<'a> {
-    pub west: Option<&'a ChunkLightColumn>,  // -X (x = 15 in west neighbor)
-    pub east: Option<&'a ChunkLightColumn>,  // +X (x = 0 in east neighbor)
+    pub west: Option<&'a ChunkLightColumn>, // -X (x = 15 in west neighbor)
+    pub east: Option<&'a ChunkLightColumn>, // +X (x = 0 in east neighbor)
     pub north: Option<&'a ChunkLightColumn>, // -Z (z = 15 in north neighbor)
     pub south: Option<&'a ChunkLightColumn>, // +Z (z = 0 in south neighbor)
 }

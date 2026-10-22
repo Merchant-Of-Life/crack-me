@@ -1,5 +1,5 @@
-use crate::PackedVoxelVertex;
 use crate::render::TextureArray;
+use crate::PackedVoxelVertex;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]

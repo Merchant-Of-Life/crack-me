@@ -1,11 +1,11 @@
+use asset_pipeline::{apply_linear_tint, linear_to_srgb, srgb_to_linear};
+use image::{imageops, DynamicImage, GenericImageView, ImageFormat, RgbaImage};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use image::{imageops, DynamicImage, GenericImageView, ImageFormat, RgbaImage};
-use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
-use asset_pipeline::{apply_linear_tint, linear_to_srgb, srgb_to_linear};
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
@@ -55,7 +55,6 @@ pub struct Manifest {
     pub pre_tinted_layers: BTreeMap<String, u32>,
     pub textures: BTreeMap<String, TextureEntry>,
 }
-
 
 /// Detects if an RGBA buffer is a cutout (contains both transparent and opaque pixels)
 fn is_cutout(rgba: &[u8]) -> bool {
@@ -154,7 +153,11 @@ fn downsample_linear_2x(
 
         for _ in 0..10 {
             let mid = (low + high) * 0.5;
-            let cov = unscaled_alphas.iter().filter(|&&a| a * mid > alpha_threshold).count() as f32 / total_px;
+            let cov = unscaled_alphas
+                .iter()
+                .filter(|&&a| a * mid > alpha_threshold)
+                .count() as f32
+                / total_px;
             if cov < ref_coverage {
                 low = mid;
             } else {
@@ -171,7 +174,6 @@ fn downsample_linear_2x(
     (dst, dst_w, dst_h)
 }
 
-
 /// Downsamples an image of size (w, h) down to 16x16 in successive 2x steps
 fn downsample_to_16x16(img: &DynamicImage) -> Vec<u8> {
     let (mut cur_w, mut cur_h) = img.dimensions();
@@ -179,7 +181,8 @@ fn downsample_to_16x16(img: &DynamicImage) -> Vec<u8> {
     let cutout = is_cutout(&buf);
 
     while cur_w > 16 || cur_h > 16 {
-        let (next_buf, next_w, next_h) = downsample_linear_2x(&buf, cur_w as usize, cur_h as usize, cutout);
+        let (next_buf, next_w, next_h) =
+            downsample_linear_2x(&buf, cur_w as usize, cur_h as usize, cutout);
         buf = next_buf;
         cur_w = next_w as u32;
         cur_h = next_h as u32;
@@ -203,7 +206,9 @@ fn build_timeline(anim: Option<&AnimationMetadata>, frame_count: u32) -> (Vec<u3
         for f in frames {
             let (idx, duration) = match f {
                 AnimationFrameSpec::Index(i) => (*i, frametime),
-                AnimationFrameSpec::Detailed { index, time } => (*index, time.unwrap_or(frametime).max(1)),
+                AnimationFrameSpec::Detailed { index, time } => {
+                    (*index, time.unwrap_or(frametime).max(1))
+                }
             };
             if idx < frame_count {
                 for _ in 0..duration {
@@ -288,7 +293,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             fs::write(dest, buf)?;
             state_count += 1;
         } else if name.starts_with("assets/minecraft/textures/block/") {
-            let rel = name.strip_prefix("assets/minecraft/textures/block/").unwrap();
+            let rel = name
+                .strip_prefix("assets/minecraft/textures/block/")
+                .unwrap();
             if rel.ends_with(".png") {
                 let mut buf = Vec::new();
                 file.read_to_end(&mut buf)?;
@@ -335,18 +342,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let frame_count = if animated { h / w } else { 1 };
         let has_mcmeta = mcmeta_data.contains_key(name);
 
-        let parsed_mcmeta: Option<AnimationMetadata> = if let Some(meta_bytes) = mcmeta_data.get(name) {
-            serde_json::from_slice::<McMeta>(meta_bytes).ok().and_then(|m| m.animation)
-        } else {
-            None
-        };
+        let parsed_mcmeta: Option<AnimationMetadata> =
+            if let Some(meta_bytes) = mcmeta_data.get(name) {
+                serde_json::from_slice::<McMeta>(meta_bytes)
+                    .ok()
+                    .and_then(|m| m.animation)
+            } else {
+                None
+            };
 
         let base_layer_for_entry = current_layer;
 
         if animated {
             // Process all individual animation frames
             let (timeline, interpolate) = build_timeline(parsed_mcmeta.as_ref(), frame_count);
-            let frametime = parsed_mcmeta.as_ref().and_then(|a| a.frametime).unwrap_or(1).max(1);
+            let frametime = parsed_mcmeta
+                .as_ref()
+                .and_then(|a| a.frametime)
+                .unwrap_or(1)
+                .max(1);
             let timeline_offset = global_timeline.len() as u32;
             let timeline_len = timeline.len() as u32;
             global_timeline.extend(&timeline);
@@ -464,7 +478,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             current_layer += 1;
         } else {
-            eprintln!("Warning: Could not find base texture '{}' to pre-tint", src_name);
+            eprintln!(
+                "Warning: Could not find base texture '{}' to pre-tint",
+                src_name
+            );
         }
     }
 
@@ -476,15 +493,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ) {
         let tinted_overlay = apply_linear_tint(overlay_16, 0x79C05A);
         let mut composite = dirt_16.clone();
-        for (comp_chunk, over_chunk) in composite.chunks_exact_mut(4).zip(tinted_overlay.chunks_exact(4)) {
+        for (comp_chunk, over_chunk) in composite
+            .chunks_exact_mut(4)
+            .zip(tinted_overlay.chunks_exact(4))
+        {
             let over_a = over_chunk[3];
             if over_a == 255 {
                 comp_chunk.copy_from_slice(over_chunk);
             } else if over_a > 0 {
                 let a = over_a as f32 / 255.0;
-                comp_chunk[0] = (over_chunk[0] as f32 * a + comp_chunk[0] as f32 * (1.0 - a)).round() as u8;
-                comp_chunk[1] = (over_chunk[1] as f32 * a + comp_chunk[1] as f32 * (1.0 - a)).round() as u8;
-                comp_chunk[2] = (over_chunk[2] as f32 * a + comp_chunk[2] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[0] =
+                    (over_chunk[0] as f32 * a + comp_chunk[0] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[1] =
+                    (over_chunk[1] as f32 * a + comp_chunk[1] as f32 * (1.0 - a)).round() as u8;
+                comp_chunk[2] =
+                    (over_chunk[2] as f32 * a + comp_chunk[2] as f32 * (1.0 - a)).round() as u8;
                 comp_chunk[3] = 255;
             }
         }
@@ -511,12 +534,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         current_layer += 1;
     } else {
-        eprintln!("Warning: Could not find grass_block_side or grass_block_side_overlay to composite");
+        eprintln!(
+            "Warning: Could not find grass_block_side or grass_block_side_overlay to composite"
+        );
     }
 
     let total_layers = current_layer;
-    println!("Total layers in 2D array texture: {} (under 2048 limit)", total_layers);
-    println!("Generating 4 offline mipmap levels in linear color space with coverage preservation...");
+    println!(
+        "Total layers in 2D array texture: {} (under 2048 limit)",
+        total_layers
+    );
+    println!(
+        "Generating 4 offline mipmap levels in linear color space with coverage preservation..."
+    );
 
     // Generate full mip chain:
     // Level 0: 16x16
@@ -531,7 +561,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bytes_per_layer_mip0 = 16 * 16 * 4;
     for l in 0..total_layers as usize {
-        let layer_mip0 = &mip0_layers_rgba8[l * bytes_per_layer_mip0..(l + 1) * bytes_per_layer_mip0];
+        let layer_mip0 =
+            &mip0_layers_rgba8[l * bytes_per_layer_mip0..(l + 1) * bytes_per_layer_mip0];
         let cutout = is_cutout(layer_mip0);
 
         let (layer_mip1, _, _) = downsample_linear_2x(layer_mip0, 16, 16, cutout);
@@ -546,11 +577,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Write out all mip files
-    fs::write("assets/textures/block_layers_mip0_16x16.rgba8", &mip0_layers_rgba8)?;
-    fs::write("assets/textures/block_layers_mip1_8x8.rgba8", &mip1_layers_rgba8)?;
-    fs::write("assets/textures/block_layers_mip2_4x4.rgba8", &mip2_layers_rgba8)?;
-    fs::write("assets/textures/block_layers_mip3_2x2.rgba8", &mip3_layers_rgba8)?;
-    fs::write("assets/textures/block_layers_mip4_1x1.rgba8", &mip4_layers_rgba8)?;
+    fs::write(
+        "assets/textures/block_layers_mip0_16x16.rgba8",
+        &mip0_layers_rgba8,
+    )?;
+    fs::write(
+        "assets/textures/block_layers_mip1_8x8.rgba8",
+        &mip1_layers_rgba8,
+    )?;
+    fs::write(
+        "assets/textures/block_layers_mip2_4x4.rgba8",
+        &mip2_layers_rgba8,
+    )?;
+    fs::write(
+        "assets/textures/block_layers_mip3_2x2.rgba8",
+        &mip3_layers_rgba8,
+    )?;
+    fs::write(
+        "assets/textures/block_layers_mip4_1x1.rgba8",
+        &mip4_layers_rgba8,
+    )?;
 
     // Write binary timeline table
     let mut timeline_bytes = Vec::with_capacity(global_timeline.len() * 4);
@@ -568,7 +614,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let ft_field = if entry.interpolate { 0 } else { 1 };
             for f in 0..entry.frame_count as usize {
                 if base + f < total_layers as usize {
-                    animation_meta[base + f] = [entry.timeline_offset, entry.timeline_len, ft_field];
+                    animation_meta[base + f] =
+                        [entry.timeline_offset, entry.timeline_len, ft_field];
                 }
             }
         } else {
@@ -599,12 +646,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Asset Pipeline Execution Complete:");
     println!("  Total Texture Layers: {}", total_layers);
     println!("  Mip Levels Baked: 5 (16x16 -> 8x8 -> 4x4 -> 2x2 -> 1x1)");
-    println!("  Timeline Buffer Size: {} entries ({} bytes)", global_timeline.len(), timeline_bytes.len());
+    println!(
+        "  Timeline Buffer Size: {} entries ({} bytes)",
+        global_timeline.len(),
+        timeline_bytes.len()
+    );
     println!("  Pre-tinted layers: birch_leaves_tinted, spruce_leaves_tinted, lily_pad_tinted");
     println!("  Extracted models: {} to assets/models/block", model_count);
-    println!("  Extracted blockstates: {} to assets/blockstates", state_count);
+    println!(
+        "  Extracted blockstates: {} to assets/blockstates",
+        state_count
+    );
     println!("------------------------------------------------------------");
 
     Ok(())
 }
-

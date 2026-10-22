@@ -216,7 +216,9 @@ impl ChunkLightColumn {
             return 0xF0; // sky 15, block 0
         }
         match Self::section_for_y(y) {
-            Some((s, local_y)) => self.sections[s].get_packed_idx(section_voxel_index(x, local_y, z)),
+            Some((s, local_y)) => {
+                self.sections[s].get_packed_idx(section_voxel_index(x, local_y, z))
+            }
             None => 0, // y < MIN_Y
         }
     }

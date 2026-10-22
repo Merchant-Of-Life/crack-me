@@ -24,8 +24,22 @@ use std::fs;
 use std::path::Path;
 
 const DYED_COLORS: [&str; 16] = [
-    "white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray",
-    "cyan", "purple", "blue", "brown", "green", "red", "black",
+    "white",
+    "orange",
+    "magenta",
+    "light_blue",
+    "yellow",
+    "lime",
+    "pink",
+    "gray",
+    "light_gray",
+    "cyan",
+    "purple",
+    "blue",
+    "brown",
+    "green",
+    "red",
+    "black",
 ];
 
 // ---------------------------------------------------------------------------
@@ -195,7 +209,9 @@ fn detect_helper_undershoots(
 
     let mut layer_has_alpha: BTreeMap<String, bool> = BTreeMap::new();
     for (name, entry) in textures {
-        let Some(base_layer) = entry.get("base_layer").and_then(|l| l.as_u64()) else { continue };
+        let Some(base_layer) = entry.get("base_layer").and_then(|l| l.as_u64()) else {
+            continue;
+        };
         let offset = (base_layer as usize) * 1024;
         let mut has_alpha = false;
         if offset + 1024 <= mip0_bytes.len() {
@@ -211,14 +227,22 @@ fn detect_helper_undershoots(
 
     let mut undershoots = Vec::new();
     for block in registry_blocks {
-        let is_solid = render_layers.get(block).map(|s| s.as_str()).unwrap_or("solid") == "solid";
+        let is_solid = render_layers
+            .get(block)
+            .map(|s| s.as_str())
+            .unwrap_or("solid")
+            == "solid";
         if !is_solid {
             continue;
         }
 
         let bs_path = format!("assets/blockstates/{}.json", block);
-        let Ok(bs_str) = fs::read_to_string(&bs_path) else { continue };
-        let Ok(bs_val): Result<J, _> = serde_json::from_str(&bs_str) else { continue };
+        let Ok(bs_str) = fs::read_to_string(&bs_path) else {
+            continue;
+        };
+        let Ok(bs_val): Result<J, _> = serde_json::from_str(&bs_str) else {
+            continue;
+        };
 
         let mut model_names = BTreeSet::new();
         if let Some(variants) = bs_val.get("variants").and_then(|v| v.as_object()) {
@@ -226,7 +250,8 @@ fn detect_helper_undershoots(
                 if let Some(arr) = v.as_array() {
                     for item in arr {
                         if let Some(m) = item.get("model").and_then(|s| s.as_str()) {
-                            model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                            model_names
+                                .insert(m.replace("minecraft:block/", "").replace("block/", ""));
                         }
                     }
                 } else if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
@@ -240,7 +265,9 @@ fn detect_helper_undershoots(
                     if let Some(arr) = apply.as_array() {
                         for item in arr {
                             if let Some(m) = item.get("model").and_then(|s| s.as_str()) {
-                                model_names.insert(m.replace("minecraft:block/", "").replace("block/", ""));
+                                model_names.insert(
+                                    m.replace("minecraft:block/", "").replace("block/", ""),
+                                );
                             }
                         }
                     } else if let Some(m) = apply.get("model").and_then(|s| s.as_str()) {
@@ -255,8 +282,12 @@ fn detect_helper_undershoots(
             let mut cur_model = m_name;
             for _ in 0..8 {
                 let m_path = format!("assets/models/block/{}.json", cur_model);
-                let Ok(m_str) = fs::read_to_string(&m_path) else { break; };
-                let Ok(m_val): Result<J, _> = serde_json::from_str(&m_str) else { break; };
+                let Ok(m_str) = fs::read_to_string(&m_path) else {
+                    break;
+                };
+                let Ok(m_val): Result<J, _> = serde_json::from_str(&m_str) else {
+                    break;
+                };
                 if let Some(tex_obj) = m_val.get("textures").and_then(|t| t.as_object()) {
                     for t_val in tex_obj.values() {
                         let t_str_opt = if let Some(s) = t_val.as_str() {
@@ -268,7 +299,8 @@ fn detect_helper_undershoots(
                         };
                         if let Some(t_str) = t_str_opt {
                             if !t_str.starts_with('#') {
-                                let clean_t = t_str.replace("minecraft:block/", "").replace("block/", "");
+                                let clean_t =
+                                    t_str.replace("minecraft:block/", "").replace("block/", "");
                                 if layer_has_alpha.get(&clean_t).copied().unwrap_or(false) {
                                     has_cutout_tex = true;
                                     break;
@@ -327,7 +359,8 @@ fn reg_ids(
     copper_prefixes: &[String],
     copper_special: &[String],
 ) -> Vec<String> {
-    if body.contains("ColorCollection.registerBlocks(") || body.contains("ColorCollection.zipMap(") {
+    if body.contains("ColorCollection.registerBlocks(") || body.contains("ColorCollection.zipMap(")
+    {
         let base = base.strip_prefix("dyed_").unwrap_or(base);
         return DYED_COLORS.iter().map(|c| format!("{c}_{base}")).collect();
     }
@@ -369,7 +402,9 @@ fn collect_helpers(src: &str) -> BTreeMap<String, String> {
         }) else {
             break;
         };
-        let Some(param_close) = balanced_end(src, paren) else { break };
+        let Some(param_close) = balanced_end(src, paren) else {
+            break;
+        };
         let scan_end = src.len().min(param_close + 4_000);
         let Some(bopen_rel) = src[param_close..scan_end].find('{') else {
             cursor = param_close;
@@ -408,14 +443,18 @@ fn substitute_body(body: &str, helpers: &BTreeMap<String, String>) -> String {
     let mut body = body.to_string();
     while let Some(at) = body.find("wallVariant(") {
         let open_idx = at + "wallVariant".len();
-        let Some(close) = balanced_end(&body, open_idx) else { break };
+        let Some(close) = balanced_end(&body, open_idx) else {
+            break;
+        };
         body.replace_range(at..close + 1, "");
     }
     for (name, expr) in helpers {
         let call_token = format!("{name}(");
         while let Some(at) = body.find(&call_token) {
             let open = at + name.len();
-            let Some(close) = balanced_end(&body, open) else { break };
+            let Some(close) = balanced_end(&body, open) else {
+                break;
+            };
             body.replace_range(at..close + 1, &format!("({expr})"));
         }
     }
@@ -509,24 +548,32 @@ fn classify_expr(expr: &str) -> Result<Option<J>, String> {
 
     // weathering-copper switch (Blocks.java:4538): UNWEATHERED/EXPOSED/WEATHERED/OXIDIZED
     if e.contains("litBlockEmission(switch") {
-        return Ok(Some(json!({"kind": "weathering_lit", "cases": parse_cases(e)?})));
+        return Ok(Some(
+            json!({"kind": "weathering_lit", "cases": parse_cases(e)?}),
+        ));
     }
 
     // CandleBlock.java:42 — `LIT ? 3 * CANDLES : 0`
     if e.contains("CandleBlock.LIGHT_EMISSION") {
-        return Ok(Some(json!({"kind": "lit_scale", "prop": "lit", "base": 3, "per": 3,
-                              "count_prop": "candles"})));
+        return Ok(Some(
+            json!({"kind": "lit_scale", "prop": "lit", "base": 3, "per": 3,
+                              "count_prop": "candles"}),
+        ));
     }
 
     // SeaPickleBlock — `isDead ? 0 : 3 + 3 * PICKLES` (isDead == !WATERLOGGED)
     if e.contains("SeaPickleBlock.isDead") {
-        return Ok(Some(json!({"kind": "alive_scale", "alive_prop": "waterlogged",
-                              "add": 3, "per": 3, "count_prop": "pickles"})));
+        return Ok(Some(
+            json!({"kind": "alive_scale", "alive_prop": "waterlogged",
+                              "add": 3, "per": 3, "count_prop": "pickles"}),
+        ));
     }
 
     // RespawnAnchorBlock.java:195 — floor(CHARGE / 4 * N); registration passes N=15
     if e.contains("getScaledChargeLevel") {
-        return Ok(Some(json!({"kind": "prop_scale", "prop": "charge", "per": 15, "denom": 4})));
+        return Ok(Some(
+            json!({"kind": "prop_scale", "prop": "charge", "per": 15, "denom": 4}),
+        ));
     }
 
     // LightBlock — emission equals its `level` property (0..15)
@@ -542,9 +589,11 @@ fn classify_expr(expr: &str) -> Result<Option<J>, String> {
 
     // TrialSpawnerState (Blocks.java:236066) — TrialSpawnerState.java:33-37 constructor table
     if e.contains("TrialSpawnerState") || e.contains("TrialSpawnerBlock.STATE") {
-        return Ok(Some(json!({"kind": "prop_map", "prop": "trial_spawner_state",
+        return Ok(Some(
+            json!({"kind": "prop_map", "prop": "trial_spawner_state",
             "map": {"inactive": 0, "waiting_for_players": 4, "active": 8,
-                    "waiting_for_reward_ejection": 8, "ejecting_reward": 8, "cooldown": 0}})));
+                    "waiting_for_reward_ejection": 8, "ejecting_reward": 8, "cooldown": 0}}),
+        ));
     }
 
     // CaveVines.emission(N) — CaveVines.java:54: `BERRIES ? N : 0`
@@ -573,7 +622,11 @@ fn classify_expr(expr: &str) -> Result<Option<J>, String> {
 fn expand_per_id(rec: &OutRec, ids: &[String]) -> Vec<(String, OutRec)> {
     if let OutRec::Resolved(r) = rec {
         if r.get("kind").and_then(|k| k.as_str()) == Some("weathering_lit") {
-            let cases = r.get("cases").and_then(|c| c.as_array()).cloned().unwrap_or_default();
+            let cases = r
+                .get("cases")
+                .and_then(|c| c.as_array())
+                .cloned()
+                .unwrap_or_default();
             let stage_value = |stage: u8| -> u8 {
                 cases
                     .iter()
@@ -588,7 +641,9 @@ fn expand_per_id(rec: &OutRec, ids: &[String]) -> Vec<(String, OutRec)> {
                 .map(|(i, id)| {
                     (
                         id.clone(),
-                        OutRec::Resolved(json!({"kind": "lit", "value": stage_value(((i % 4) as u8) + 1)})),
+                        OutRec::Resolved(
+                            json!({"kind": "lit", "value": stage_value(((i % 4) as u8) + 1)}),
+                        ),
                     )
                 })
                 .collect();
@@ -639,7 +694,9 @@ fn main() {
 
     let helpers = collect_helpers(&src);
 
-    let decomp_dir = Path::new(&src_path).parent().unwrap_or_else(|| Path::new("."));
+    let decomp_dir = Path::new(&src_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
     let copper_prefixes = parse_weathering_copper_prefixes(decomp_dir);
     let copper_special = parse_copper_block_special_names(decomp_dir);
 
@@ -665,8 +722,7 @@ fn main() {
                 for (id, mut rec) in expand_per_id(&rec, &ids) {
                     if let OutRec::Resolved(ref mut r) = rec {
                         if let J::Object(m) = r {
-                            m.entry("decl".to_string())
-                                .or_insert_with(|| json!(decl));
+                            m.entry("decl".to_string()).or_insert_with(|| json!(decl));
                         }
                     }
                     records.insert(id, rec);
@@ -807,7 +863,9 @@ fn main() {
                         Some(OutRec::Legacy(parent)) => cur = parent.clone(),
                         Some(OutRec::Omit) => break, // parent has no emission → child has none either
                         None => {
-                            diagnostics.push(format!("{origin}: legacy-copy parent {cur} not found in Blocks.java"));
+                            diagnostics.push(format!(
+                                "{origin}: legacy-copy parent {cur} not found in Blocks.java"
+                            ));
                             break;
                         }
                     }
@@ -816,10 +874,7 @@ fn main() {
         }
     }
 
-    let emit_map: BTreeMap<String, J> = emission
-        .into_iter()
-        .map(|(id, (_, r))| (id, r))
-        .collect();
+    let emit_map: BTreeMap<String, J> = emission.into_iter().map(|(id, (_, r))| (id, r)).collect();
 
     let no_occlusion_n = no_occlusion.len();
     let no_collision_n = no_collision.len();
@@ -876,11 +931,27 @@ fn main() {
         .collect();
 
     println!("=================== EXTRACTOR COVERAGE REPORT ===================");
-    println!("Registry blocks scanned from assets/blockstates: {}", registry_blocks.len());
-    println!("Blocks harvested from Blocks.java: {}", all_harvested_ids.len());
-    println!("Blocks with non-default properties (covered by at least 1 map): {}", covered_blocks.len());
-    println!("Blocks absent from Blocks.java harvest ({}): {:?}", unharvested_from_blocks_java.len(), unharvested_from_blocks_java);
-    println!("Blocks with standard opaque defaults (absent from all property maps): {}", absent_from_all_maps.len());
+    println!(
+        "Registry blocks scanned from assets/blockstates: {}",
+        registry_blocks.len()
+    );
+    println!(
+        "Blocks harvested from Blocks.java: {}",
+        all_harvested_ids.len()
+    );
+    println!(
+        "Blocks with non-default properties (covered by at least 1 map): {}",
+        covered_blocks.len()
+    );
+    println!(
+        "Blocks absent from Blocks.java harvest ({}): {:?}",
+        unharvested_from_blocks_java.len(),
+        unharvested_from_blocks_java
+    );
+    println!(
+        "Blocks with standard opaque defaults (absent from all property maps): {}",
+        absent_from_all_maps.len()
+    );
     println!(
         "Render layers breakdown (of {} registry blocks): {} solid, {} cutout_mipped, {} cutout, {} translucent",
         registry_blocks.len(),
@@ -929,8 +1000,11 @@ fn main() {
     if let Some(parent) = Path::new(&out_path).parent() {
         fs::create_dir_all(parent).ok();
     }
-    fs::write(&out_path, serde_json::to_string_pretty(&json).unwrap() + "\n")
-        .expect("write block_properties.json");
+    fs::write(
+        &out_path,
+        serde_json::to_string_pretty(&json).unwrap() + "\n",
+    )
+    .expect("write block_properties.json");
 
     println!(
         "block_properties.json: {} emission entries, {} noOcclusion, {} noCollision, {} skylight, {} cull_classes, {} non-solid render_layers; {} problems",

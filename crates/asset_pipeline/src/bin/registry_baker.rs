@@ -422,8 +422,18 @@ fn tint_decision(block: &str) -> TintDecision {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Emission {
-    Constant { value: u8, #[serde(default)] decl: String },
-    Lit { value: u8, #[serde(default)] prop: String, #[serde(default)] decl: String },
+    Constant {
+        value: u8,
+        #[serde(default)]
+        decl: String,
+    },
+    Lit {
+        value: u8,
+        #[serde(default)]
+        prop: String,
+        #[serde(default)]
+        decl: String,
+    },
     LitScale {
         base: u8,
         per: u8,
@@ -441,9 +451,24 @@ pub enum Emission {
         #[serde(default)]
         decl: String,
     },
-    PropValue { prop: String, #[serde(default)] decl: String },
-    PropScale { prop: String, per: u8, denom: u8, #[serde(default)] decl: String },
-    PropMap { prop: String, map: BTreeMap<String, u8>, #[serde(default)] decl: String },
+    PropValue {
+        prop: String,
+        #[serde(default)]
+        decl: String,
+    },
+    PropScale {
+        prop: String,
+        per: u8,
+        denom: u8,
+        #[serde(default)]
+        decl: String,
+    },
+    PropMap {
+        prop: String,
+        map: BTreeMap<String, u8>,
+        #[serde(default)]
+        decl: String,
+    },
 }
 
 #[derive(serde::Deserialize)]
@@ -541,7 +566,10 @@ impl BlockProps {
     }
 
     pub fn render_layer(&self, block: &str) -> u8 {
-        self.render_layers.get(block).copied().unwrap_or(LAYER_SOLID)
+        self.render_layers
+            .get(block)
+            .copied()
+            .unwrap_or(LAYER_SOLID)
     }
 
     fn is_fluid(block: &str) -> bool {
@@ -550,7 +578,9 @@ impl BlockProps {
     }
 
     fn val_u8(vals: &BTreeMap<String, String>, key: &str) -> u8 {
-        vals.get(key).and_then(|v| v.parse::<u8>().ok()).unwrap_or(0)
+        vals.get(key)
+            .and_then(|v| v.parse::<u8>().ok())
+            .unwrap_or(0)
     }
 
     fn is_true(vals: &BTreeMap<String, String>, key: &str) -> bool {
@@ -560,11 +590,16 @@ impl BlockProps {
     /// Per-state block-light emission. `collapsed = true` bakes the always-lit
     /// representative value for single-row (Complex/Empty) approximations, as
     /// documented in SPECS.md §Registry v1.
-    pub fn emission_row(&self, block: &str, vals: &BTreeMap<String, String>, collapsed: bool) -> u8 {
-        let rec = self
-            .emission
-            .get(block)
-            .or_else(|| self.emission.get(block.strip_prefix("flowing_").unwrap_or(block)));
+    pub fn emission_row(
+        &self,
+        block: &str,
+        vals: &BTreeMap<String, String>,
+        collapsed: bool,
+    ) -> u8 {
+        let rec = self.emission.get(block).or_else(|| {
+            self.emission
+                .get(block.strip_prefix("flowing_").unwrap_or(block))
+        });
         let Some(rec) = rec else { return 0 };
         match rec {
             Emission::Constant { value, .. } => *value,
@@ -573,9 +608,19 @@ impl BlockProps {
                     return *value;
                 }
                 let key = if prop.is_empty() { "lit" } else { prop };
-                if Self::is_true(vals, key) { *value } else { 0 }
+                if Self::is_true(vals, key) {
+                    *value
+                } else {
+                    0
+                }
             }
-            Emission::LitScale { base, per, prop, count_prop, .. } => {
+            Emission::LitScale {
+                base,
+                per,
+                prop,
+                count_prop,
+                ..
+            } => {
                 let count = Self::val_u8(vals, count_prop).max(1);
                 if collapsed {
                     return *base;
@@ -587,7 +632,13 @@ impl BlockProps {
                     0
                 }
             }
-            Emission::AliveScale { alive_prop, add, per, count_prop, .. } => {
+            Emission::AliveScale {
+                alive_prop,
+                add,
+                per,
+                count_prop,
+                ..
+            } => {
                 let count = Self::val_u8(vals, count_prop).max(1);
                 if collapsed {
                     return add.saturating_add(per.saturating_mul(1));
@@ -599,9 +650,15 @@ impl BlockProps {
                 }
             }
             Emission::PropValue { prop, .. } => {
-                if collapsed { 0 } else { Self::val_u8(vals, prop) }
+                if collapsed {
+                    0
+                } else {
+                    Self::val_u8(vals, prop)
+                }
             }
-            Emission::PropScale { prop, per, denom, .. } => {
+            Emission::PropScale {
+                prop, per, denom, ..
+            } => {
                 if collapsed {
                     0
                 } else {
@@ -613,7 +670,9 @@ impl BlockProps {
                 if collapsed {
                     map.values().copied().max().unwrap_or(0)
                 } else {
-                    map.get(vals.get(prop).map(String::as_str).unwrap_or("")).copied().unwrap_or(0)
+                    map.get(vals.get(prop).map(String::as_str).unwrap_or(""))
+                        .copied()
+                        .unwrap_or(0)
                 }
             }
         }
@@ -759,15 +818,11 @@ pub fn bake(
         } else if let Some(model_ref) = &default_ref {
             match models.resolve(model_ref) {
                 Some(rm) => {
-                    let family_hit = |list: &[&str]| {
-                        rm.chain
-                            .iter()
-                            .any(|c| list.contains(&c.as_str()))
-                    };
+                    let family_hit =
+                        |list: &[&str]| rm.chain.iter().any(|c| list.contains(&c.as_str()));
                     if family_hit(CROSS_FAMILY) || rm.chain.iter().any(|c| c.contains("cross")) {
                         MESH_CROSS
-                    } else if family_hit(CUBE_FAMILY)
-                        || canonical_full_cube_elements(&rm.elements)
+                    } else if family_hit(CUBE_FAMILY) || canonical_full_cube_elements(&rm.elements)
                     {
                         MESH_CUBE
                     } else if rm.elements.is_empty() {
@@ -777,7 +832,10 @@ pub fn bake(
                     }
                 }
                 None => {
-                    warnings.push(format!("{}: unresolved default model {:?}", name, model_ref));
+                    warnings.push(format!(
+                        "{}: unresolved default model {:?}",
+                        name, model_ref
+                    ));
                     MESH_COMPLEX
                 }
             }
@@ -802,9 +860,17 @@ pub fn bake(
                     Some(l) => l,
                     None => return Err(format!("fluid texture missing for {}", name).into()),
                 };
-                let tint = if name.starts_with("water") { TINT_WATER } else { TINT_NONE };
+                let tint = if name.starts_with("water") {
+                    TINT_WATER
+                } else {
+                    TINT_NONE
+                };
                 let mut entry = BlockStateEntry::default();
-                entry.faces = [FaceInfo { base_layer: tex, tint_mode: tint, uv_rot: 0 }; 6];
+                entry.faces = [FaceInfo {
+                    base_layer: tex,
+                    tint_mode: tint,
+                    uv_rot: 0,
+                }; 6];
                 entry.mesh_type = MESH_FLUID;
                 entry.is_opaque = 0;
                 entry.is_solid = 0;
@@ -898,13 +964,7 @@ pub fn bake(
             return Err(format!("{}: no states emitted for mesh type {}", name, mesh_type).into());
         }
 
-        blocks.insert(
-            name.clone(),
-            BakedBlock {
-                mesh_type,
-                states,
-            },
-        );
+        blocks.insert(name.clone(), BakedBlock { mesh_type, states });
     }
 
     let mut baked = Baked {
@@ -938,7 +998,11 @@ impl VariantValue {
     fn from_entry(v: &Value) -> Self {
         let e = variant_obj(v);
         Self {
-            model: e.get("model").and_then(|m| m.as_str()).unwrap_or("").to_string(),
+            model: e
+                .get("model")
+                .and_then(|m| m.as_str())
+                .unwrap_or("")
+                .to_string(),
             x: e.get("x").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
             y: e.get("y").and_then(|y| y.as_i64()).unwrap_or(0) as i32,
             _uvlock: e.get("uvlock").and_then(|u| u.as_bool()).unwrap_or(false),
@@ -992,17 +1056,15 @@ fn canonical_full_cube_elements(elements: &[Value]) -> bool {
     let is_full_with_cull = |e: &Value| -> bool {
         e.get("from").map(v_is_unit_origin) == Some(true)
             && e.get("to").map(v_is_unit_max) == Some(true)
-            && e
-                .get("faces")
+            && e.get("faces")
                 .and_then(|f: &Value| f.as_object().map(|o| o.values().count()))
                 .unwrap_or(0)
                 >= 6
             && e.get("faces")
                 .and_then(|f: &Value| f.as_object())
                 .map(|o| {
-                    o.values().all(|fv| {
-                        fv.get("cullface").and_then(|c| c.as_str()).is_some() || false
-                    })
+                    o.values()
+                        .all(|fv| fv.get("cullface").and_then(|c| c.as_str()).is_some() || false)
                 })
                 .unwrap_or(false)
     };
@@ -1080,14 +1142,18 @@ fn cube_state_row(
                 }
             }
         }
-        let raw_tex =
-            first_face_tex.ok_or_else(|| format!("{}: cross model without face textures", block))?;
+        let raw_tex = first_face_tex
+            .ok_or_else(|| format!("{}: cross model without face textures", block))?;
         let tex = models
             .deref_texture(&raw_tex, &rm.textures)
             .ok_or_else(|| format!("{}: unresolved cross texture", block))?;
         let layer =
             layer_of(&tex).ok_or_else(|| format!("{}: texture {} not in manifest", block, tex))?;
-        entry.faces = [FaceInfo { base_layer: layer, tint_mode, uv_rot: 0 }; 6];
+        entry.faces = [FaceInfo {
+            base_layer: layer,
+            tint_mode,
+            uv_rot: 0,
+        }; 6];
         return Ok(entry);
     }
 
@@ -1117,7 +1183,11 @@ fn cube_state_row(
     }
     for (w_idx, m_idx) in inv.iter().enumerate() {
         if *m_idx == usize::MAX {
-            return Err(format!("{}: rotation {} {} dropped face {}", block, vv.x, vv.y, w_idx).into());
+            return Err(format!(
+                "{}: rotation {} {} dropped face {}",
+                block, vv.x, vv.y, w_idx
+            )
+            .into());
         }
         let face_name = FACE_NAMES[*m_idx];
         let fd = face_map
@@ -1143,9 +1213,15 @@ fn cube_state_row(
         } else {
             let tex = models
                 .deref_texture(&fd.texture, &rm.textures)
-                .ok_or_else(|| format!("{}: unresolved texture for cullface {}", block, face_name))?;
-            let layer = layer_of(&tex)
-                .ok_or_else(|| format!("{}: texture {} not in manifest (golden: unresolved == 0)", block, tex))?;
+                .ok_or_else(|| {
+                    format!("{}: unresolved texture for cullface {}", block, face_name)
+                })?;
+            let layer = layer_of(&tex).ok_or_else(|| {
+                format!(
+                    "{}: texture {} not in manifest (golden: unresolved == 0)",
+                    block, tex
+                )
+            })?;
             match tint {
                 TintDecision::Swap(swap) => swap as u16,
                 _ => layer,
@@ -1214,14 +1290,13 @@ pub fn emit(baked: &Baked) -> Vec<u8> {
 }
 
 pub fn write_registry(assets: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let props = BlockProps::load(&assets.join("registry/block_properties.json"))
-        .map_err(|e| {
-            format!(
-                "block_properties.json missing/broken ({}); run `cargo run -p asset_pipeline \
+    let props = BlockProps::load(&assets.join("registry/block_properties.json")).map_err(|e| {
+        format!(
+            "block_properties.json missing/broken ({}); run `cargo run -p asset_pipeline \
                  --bin property_extractor ~/.minecraft-decomp/src/Blocks.java` offline first",
-                e
-            )
-        })?;
+            e
+        )
+    })?;
     let baked = bake(
         &assets.join("blockstates"),
         &assets.join("models/block"),
@@ -1238,7 +1313,11 @@ pub fn write_registry(assets: &Path) -> Result<String, Box<dyn std::error::Error
     Ok(format!(
         "blocks={} states={} (cube={} cross={} fluid={} complex={} empty={}) bytes={}",
         baked.blocks.len(),
-        baked.cube_states + baked.cross_states + baked.fluid_states + baked.complex_states + baked.empty_states,
+        baked.cube_states
+            + baked.cross_states
+            + baked.fluid_states
+            + baked.complex_states
+            + baked.empty_states,
         baked.cube_states,
         baked.cross_states,
         baked.fluid_states,
@@ -1295,9 +1374,10 @@ mod tests {
 
     fn manifest_layers() -> BTreeMap<String, u32> {
         let dir = assets_dir();
-        let manifest: Value =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("textures/texture_manifest.json")).unwrap())
-                .unwrap();
+        let manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("textures/texture_manifest.json")).unwrap(),
+        )
+        .unwrap();
         let mut out = BTreeMap::new();
         if let Some(Value::Object(tex)) = manifest.get("textures") {
             for (k, v) in tex {
@@ -1313,7 +1393,11 @@ mod tests {
     fn golden_coverage_and_classification() {
         let b = baked();
         assert!(b.warnings.is_empty(), "no warnings: {:?}", b.warnings);
-        assert!(b.blocks.len() > 1_000, "{} block states files", b.blocks.len());
+        assert!(
+            b.blocks.len() > 1_000,
+            "{} block states files",
+            b.blocks.len()
+        );
         assert!(b.cube_states > 380, "{} cube states", b.cube_states);
         assert!(b.cross_states > 80, "{} cross states", b.cross_states);
         for name in ["stone", "oak_log", "water", "pink_petals", "leaf_litter"] {
@@ -1350,8 +1434,14 @@ mod tests {
         assert_eq!(axis_x.faces[FACE_SOUTH].base_layer, side);
 
         let axis_z = &log.states[2];
-        assert_eq!(axis_z.faces[FACE_SOUTH].base_layer, top, "axis z: south end");
-        assert_eq!(axis_z.faces[FACE_NORTH].base_layer, top, "axis z: north end");
+        assert_eq!(
+            axis_z.faces[FACE_SOUTH].base_layer, top,
+            "axis z: south end"
+        );
+        assert_eq!(
+            axis_z.faces[FACE_NORTH].base_layer, top,
+            "axis z: north end"
+        );
 
         let axis_y = &log.states[1];
         assert_eq!(axis_y.faces[FACE_UP].base_layer, top, "axis y: up end");
@@ -1371,18 +1461,22 @@ mod tests {
         }
         assert_eq!(water.light_filter, 1);
 
-        assert_eq!(b.blocks["oak_leaves"].states[0].faces[FACE_UP].tint_mode, TINT_FOLIAGE);
         assert_eq!(
-            b.blocks["birch_leaves"].states[0].faces[FACE_UP].base_layer,
-            1840,
+            b.blocks["oak_leaves"].states[0].faces[FACE_UP].tint_mode,
+            TINT_FOLIAGE
+        );
+        assert_eq!(
+            b.blocks["birch_leaves"].states[0].faces[FACE_UP].base_layer, 1840,
             "birch pre-tinted layer"
         );
         assert_eq!(
             b.blocks["spruce_leaves"].states[0].faces[FACE_UP].base_layer,
             1841
         );
-        assert_eq!(b.blocks["pink_petals"].states[0].faces[FACE_UP].tint_mode, TINT_NONE,
-            "petals are NOT grass-tinted (BlockColors: BLANK first layer)");
+        assert_eq!(
+            b.blocks["pink_petals"].states[0].faces[FACE_UP].tint_mode, TINT_NONE,
+            "petals are NOT grass-tinted (BlockColors: BLANK first layer)"
+        );
         let grass = &b.blocks["grass_block"];
         assert_eq!(grass.states[0].faces[FACE_UP].tint_mode, TINT_GRASS);
         assert_eq!(grass.states[0].faces[FACE_DOWN].tint_mode, TINT_NONE);
@@ -1408,8 +1502,16 @@ mod tests {
         // furnace: facing(4) × lit(2) → half the rows emit 13, half 0.
         let rows = &b.blocks["furnace"].states;
         assert_eq!(rows.len(), 8);
-        assert_eq!(rows.iter().filter(|s| s.light_emission == 13).count(), 4, "furnace lit rows");
-        assert_eq!(rows.iter().filter(|s| s.light_emission == 0).count(), 4, "furnace unlit rows");
+        assert_eq!(
+            rows.iter().filter(|s| s.light_emission == 13).count(),
+            4,
+            "furnace lit rows"
+        );
+        assert_eq!(
+            rows.iter().filter(|s| s.light_emission == 0).count(),
+            4,
+            "furnace unlit rows"
+        );
         assert!(rows.iter().all(|s| s.light_filter == 15));
 
         // redstone_lamp is ONE block, LITλ=15 (no separate *_on block exists).
@@ -1465,8 +1567,16 @@ mod tests {
         // INACTIVE -> HALF_LIT(6) [8 rows], ACTIVE/UNLOCKING/EJECTING -> LIT(12) [24 rows]
         let vault_rows = &b.blocks["vault"].states;
         assert_eq!(vault_rows.len(), 32);
-        assert_eq!(vault_rows.iter().filter(|s| s.light_emission == 6).count(), 8, "vault inactive rows");
-        assert_eq!(vault_rows.iter().filter(|s| s.light_emission == 12).count(), 24, "vault lit rows");
+        assert_eq!(
+            vault_rows.iter().filter(|s| s.light_emission == 6).count(),
+            8,
+            "vault inactive rows"
+        );
+        assert_eq!(
+            vault_rows.iter().filter(|s| s.light_emission == 12).count(),
+            24,
+            "vault lit rows"
+        );
 
         // Trial spawner: 12 states (2 ominous x 6 trial_spawner_state)
         // Blocks.java:236066, TrialSpawnerState.java:33-37:
@@ -1474,9 +1584,21 @@ mod tests {
         // active/waiting_for_reward_ejection/ejecting_reward -> 8 [6 rows]
         let ts_rows = &b.blocks["trial_spawner"].states;
         assert_eq!(ts_rows.len(), 12);
-        assert_eq!(ts_rows.iter().filter(|s| s.light_emission == 0).count(), 4, "trial_spawner unlit rows");
-        assert_eq!(ts_rows.iter().filter(|s| s.light_emission == 4).count(), 2, "trial_spawner waiting_for_players rows");
-        assert_eq!(ts_rows.iter().filter(|s| s.light_emission == 8).count(), 6, "trial_spawner active/reward rows");
+        assert_eq!(
+            ts_rows.iter().filter(|s| s.light_emission == 0).count(),
+            4,
+            "trial_spawner unlit rows"
+        );
+        assert_eq!(
+            ts_rows.iter().filter(|s| s.light_emission == 4).count(),
+            2,
+            "trial_spawner waiting_for_players rows"
+        );
+        assert_eq!(
+            ts_rows.iter().filter(|s| s.light_emission == 8).count(),
+            6,
+            "trial_spawner active/reward rows"
+        );
     }
 
     #[test]

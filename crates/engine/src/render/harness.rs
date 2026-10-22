@@ -111,7 +111,9 @@ impl OffscreenTarget {
         device.poll(wgpu::PollType::wait_indefinitely()).ok();
         rx.recv().unwrap().expect("buffer map_async failed");
 
-        let data = buffer_slice.get_mapped_range().expect("get_mapped_range failed");
+        let data = buffer_slice
+            .get_mapped_range()
+            .expect("get_mapped_range failed");
         let unpadded_bytes_per_row = (self.width * 4) as usize;
         let mut pixels = Vec::with_capacity(unpadded_bytes_per_row * self.height as usize);
 

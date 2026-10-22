@@ -122,12 +122,36 @@ impl Aabb {
     /// Expands this AABB to enclose the movement `delta`.
     #[inline(always)]
     pub fn expand_towards(&self, delta: DVec3) -> Self {
-        let min_x = if delta.x < 0.0 { self.min_x + delta.x } else { self.min_x };
-        let max_x = if delta.x > 0.0 { self.max_x + delta.x } else { self.max_x };
-        let min_y = if delta.y < 0.0 { self.min_y + delta.y } else { self.min_y };
-        let max_y = if delta.y > 0.0 { self.max_y + delta.y } else { self.max_y };
-        let min_z = if delta.z < 0.0 { self.min_z + delta.z } else { self.min_z };
-        let max_z = if delta.z > 0.0 { self.max_z + delta.z } else { self.max_z };
+        let min_x = if delta.x < 0.0 {
+            self.min_x + delta.x
+        } else {
+            self.min_x
+        };
+        let max_x = if delta.x > 0.0 {
+            self.max_x + delta.x
+        } else {
+            self.max_x
+        };
+        let min_y = if delta.y < 0.0 {
+            self.min_y + delta.y
+        } else {
+            self.min_y
+        };
+        let max_y = if delta.y > 0.0 {
+            self.max_y + delta.y
+        } else {
+            self.max_y
+        };
+        let min_z = if delta.z < 0.0 {
+            self.min_z + delta.z
+        } else {
+            self.min_z
+        };
+        let max_z = if delta.z > 0.0 {
+            self.max_z + delta.z
+        } else {
+            self.max_z
+        };
         Self::new(min_x, min_y, min_z, max_x, max_y, max_z)
     }
 
@@ -288,7 +312,10 @@ impl PlayerPhysicsState {
 }
 
 /// Collects solid voxel AABBs that overlap `broadphase_box`.
-pub fn collect_solid_colliders(world: &impl VoxelWorldCollision, broadphase_box: &Aabb) -> Vec<Aabb> {
+pub fn collect_solid_colliders(
+    world: &impl VoxelWorldCollision,
+    broadphase_box: &Aabb,
+) -> Vec<Aabb> {
     let min_bx = (broadphase_box.min_x - COLLISION_EPSILON).floor() as i32;
     let max_bx = (broadphase_box.max_x + COLLISION_EPSILON).floor() as i32;
     let min_by = (broadphase_box.min_y - COLLISION_EPSILON).floor() as i32;
@@ -418,14 +445,18 @@ pub fn move_and_collide(
     let on_ground_after_collision = y_collision && movement.y < 0.0;
 
     // Step-up evaluation: only when (landed-this-move || onGround) && horizontal collision
-    if MAX_UP_STEP > 0.0 && (on_ground_after_collision || was_on_ground) && (x_collision || z_collision) {
+    if MAX_UP_STEP > 0.0
+        && (on_ground_after_collision || was_on_ground)
+        && (x_collision || z_collision)
+    {
         let grounded_aabb = if on_ground_after_collision {
             aabb.move_by(DVec3::new(0.0, movement_step.y, 0.0))
         } else {
             aabb
         };
 
-        let mut step_up_aabb = grounded_aabb.expand_towards(DVec3::new(movement.x, MAX_UP_STEP, movement.z));
+        let mut step_up_aabb =
+            grounded_aabb.expand_towards(DVec3::new(movement.x, MAX_UP_STEP, movement.z));
         if !on_ground_after_collision {
             step_up_aabb = step_up_aabb.expand_towards(DVec3::new(0.0, -STEP_UP_NUDGE, 0.0));
         }
@@ -438,8 +469,14 @@ pub fn move_and_collide(
                 continue;
             }
             let rel_top = c.max_y - grounded_aabb.min_y;
-            if rel_top > 0.0 && (rel_top - step_height_to_skip).abs() > COLLISION_EPSILON && rel_top <= MAX_UP_STEP {
-                if !candidates.iter().any(|&val| (val - rel_top).abs() < COLLISION_EPSILON) {
+            if rel_top > 0.0
+                && (rel_top - step_height_to_skip).abs() > COLLISION_EPSILON
+                && rel_top <= MAX_UP_STEP
+            {
+                if !candidates
+                    .iter()
+                    .any(|&val| (val - rel_top).abs() < COLLISION_EPSILON)
+                {
                     candidates.push(rel_top);
                 }
             }
@@ -452,8 +489,10 @@ pub fn move_and_collide(
                 grounded_aabb,
                 colliders,
             );
-            let step_horiz_sq = step_from_ground.x * step_from_ground.x + step_from_ground.z * step_from_ground.z;
-            let step_base_sq = movement_step.x * movement_step.x + movement_step.z * movement_step.z;
+            let step_horiz_sq =
+                step_from_ground.x * step_from_ground.x + step_from_ground.z * step_from_ground.z;
+            let step_base_sq =
+                movement_step.x * movement_step.x + movement_step.z * movement_step.z;
 
             // Strictly improves horizontal progress
             if step_horiz_sq > step_base_sq {
@@ -562,8 +601,8 @@ pub fn tick_player(
     };
 
     let (yaw_sin, yaw_cos) = input.yaw.sin_cos();
-    let move_dir = norm_s * DVec3::new(yaw_cos, 0.0, -yaw_sin)
-                 + norm_f * DVec3::new(yaw_sin, 0.0, yaw_cos);
+    let move_dir =
+        norm_s * DVec3::new(yaw_cos, 0.0, -yaw_sin) + norm_f * DVec3::new(yaw_sin, 0.0, yaw_cos);
 
     state.vel += move_dir * accel;
 
@@ -625,7 +664,10 @@ mod tests {
     }
     impl FlatWorld {
         fn new(floor_y: i32) -> Self {
-            Self { floor_y, friction: 0.6 }
+            Self {
+                floor_y,
+                friction: 0.6,
+            }
         }
         fn with_friction(floor_y: i32, friction: f64) -> Self {
             Self { floor_y, friction }
@@ -712,7 +754,8 @@ mod tests {
             ..Default::default()
         };
         tick_player(&mut state_wa, &input_wa, &world);
-        let horiz_speed = (state_wa.vel.x * state_wa.vel.x + state_wa.vel.z * state_wa.vel.z).sqrt();
+        let horiz_speed =
+            (state_wa.vel.x * state_wa.vel.x + state_wa.vel.z * state_wa.vel.z).sqrt();
         assert!((horiz_speed - 0.0182).abs() < 1e-6);
     }
 
@@ -772,8 +815,16 @@ mod tests {
         // Jump impulse vy = 0.42
         // Position moves up by 0.42 -> pos.y = 1.42 (pos.y += 0.42)
         // Post-move vertical update: (0.42 - 0.08) * 0.98 = 0.34 * 0.98 = 0.3332
-        assert!((state.pos.y - 1.42).abs() < 1e-9, "t1 pos.y must increase by exactly 0.42 (got {})", state.pos.y);
-        assert!((state.vel.y - 0.3332).abs() < 1e-9, "t1 vy must be exactly 0.3332 (got {})", state.vel.y);
+        assert!(
+            (state.pos.y - 1.42).abs() < 1e-9,
+            "t1 pos.y must increase by exactly 0.42 (got {})",
+            state.pos.y
+        );
+        assert!(
+            (state.vel.y - 0.3332).abs() < 1e-9,
+            "t1 vy must be exactly 0.3332 (got {})",
+            state.vel.y
+        );
     }
 
     #[test]
@@ -815,13 +866,21 @@ mod tests {
         tick_player(&mut state, &input, &world);
         let dy_t1 = state.pos.y - pos_before_t1;
         assert_eq!(dy_t1, 0.0, "t1 dy must be 0");
-        assert!((state.vel.y - (-0.0784)).abs() < 1e-9, "t1 vy must be -0.0784 (got {})", state.vel.y);
+        assert!(
+            (state.vel.y - (-0.0784)).abs() < 1e-9,
+            "t1 vy must be -0.0784 (got {})",
+            state.vel.y
+        );
 
         // Tick 2
         let pos_before_t2 = state.pos.y;
         tick_player(&mut state, &input, &world);
         let dy_t2 = state.pos.y - pos_before_t2;
-        assert!((dy_t2 - (-0.0784)).abs() < 1e-9, "t2 dy must be -0.0784 (got {})", dy_t2);
+        assert!(
+            (dy_t2 - (-0.0784)).abs() < 1e-9,
+            "t2 dy must be -0.0784 (got {})",
+            dy_t2
+        );
         // t2 vy = (-0.0784 - 0.08) * 0.98 = -0.1584 * 0.98 = -0.155232
         assert!((state.vel.y - (-0.155232)).abs() < 1e-9);
     }
@@ -838,13 +897,20 @@ mod tests {
         }
 
         // Closed form: -0.08 * 0.98 / (1.0 - 0.98) = -3.92
-        assert!((state.vel.y - TERMINAL_VELOCITY).abs() < 1e-4, "vel.y must converge to -3.92 (got {})", state.vel.y);
+        assert!(
+            (state.vel.y - TERMINAL_VELOCITY).abs() < 1e-4,
+            "vel.y must converge to -3.92 (got {})",
+            state.vel.y
+        );
 
         // Also verify that steady state -3.92 is an exact fixed point:
         let mut fixed_state = PlayerPhysicsState::new(DVec3::new(0.0, 1000.0, 0.0));
         fixed_state.vel.y = TERMINAL_VELOCITY;
         tick_player(&mut fixed_state, &input, &world);
-        assert!((fixed_state.vel.y - TERMINAL_VELOCITY).abs() < 1e-9, "terminal velocity must be an exact fixed point");
+        assert!(
+            (fixed_state.vel.y - TERMINAL_VELOCITY).abs() < 1e-9,
+            "terminal velocity must be an exact fixed point"
+        );
     }
 
     #[test]
@@ -860,16 +926,28 @@ mod tests {
         // Then Z sweeps, now overlapping in X (X in [0.5, 1.3]), so Z hits obstacle at 1.0 (dz capped at 1.0 - 0.9 = 0.1).
         let mov_x_first = DVec3::new(0.5, 0.0, 0.3);
         let res_x_first = collide_with_shapes(mov_x_first, aabb, &colliders);
-        assert!((res_x_first.x - 0.5).abs() < COLLISION_EPSILON, "X sweeps first and achieves full dx=0.5");
-        assert!((res_x_first.z - 0.1).abs() < COLLISION_EPSILON, "Z sweeps second and is capped at 0.1");
+        assert!(
+            (res_x_first.x - 0.5).abs() < COLLISION_EPSILON,
+            "X sweeps first and achieves full dx=0.5"
+        );
+        assert!(
+            (res_x_first.z - 0.1).abs() < COLLISION_EPSILON,
+            "Z sweeps second and is capped at 0.1"
+        );
 
         // 2. |dx| < |dz|: YZX order (Z sweeps first, then X)
         // dx=0.3 < dz=0.5 -> Z sweeps first (no X overlap, so dz achieves full 0.5).
         // Then X sweeps, now overlapping in Z (Z in [1.0, 1.4]), so X hits obstacle at 1.0 (dx capped at 1.0 - 0.8 = 0.2).
         let mov_z_first = DVec3::new(0.3, 0.0, 0.5);
         let res_z_first = collide_with_shapes(mov_z_first, aabb, &colliders);
-        assert!((res_z_first.z - 0.5).abs() < COLLISION_EPSILON, "Z sweeps first and achieves full dz=0.5");
-        assert!((res_z_first.x - 0.2).abs() < COLLISION_EPSILON, "X sweeps second and is capped at 0.2");
+        assert!(
+            (res_z_first.z - 0.5).abs() < COLLISION_EPSILON,
+            "Z sweeps first and achieves full dz=0.5"
+        );
+        assert!(
+            (res_z_first.x - 0.2).abs() < COLLISION_EPSILON,
+            "X sweeps second and is capped at 0.2"
+        );
     }
 
     #[test]
@@ -1024,7 +1102,10 @@ mod tests {
             expected_y
         );
         // Clamp semantics: alpha 0 -> previous boundary, oversized alpha -> current.
-        assert_eq!(state.interpolated_eye_pos(0.0), DVec3::new(0.0, 10.0 + EYE_HEIGHT, 0.0));
+        assert_eq!(
+            state.interpolated_eye_pos(0.0),
+            DVec3::new(0.0, 10.0 + EYE_HEIGHT, 0.0)
+        );
         assert!(
             (state.interpolated_eye_pos(1.5).y - (10.0 - 0.0784 + EYE_HEIGHT)).abs() < 1e-9,
             "alpha must clamp to 1.0"

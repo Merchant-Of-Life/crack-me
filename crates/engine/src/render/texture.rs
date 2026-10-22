@@ -27,7 +27,8 @@ impl TextureArray {
         let total_layers = manifest_json
             .get("total_layers")
             .and_then(|v| v.as_u64())
-            .ok_or("total_layers missing in texture_manifest.json")? as u32;
+            .ok_or("total_layers missing in texture_manifest.json")?
+            as u32;
 
         let mip0 = fs::read(textures_dir.join("block_layers_mip0_16x16.rgba8"))?;
         let mip1 = fs::read(textures_dir.join("block_layers_mip1_8x8.rgba8"))?;
@@ -98,7 +99,12 @@ impl TextureArray {
             if mip_data.len() != expected_bytes {
                 return Err(format!(
                     "Mip level {} size mismatch: expected {} bytes ({} layers x {}x{}x4), got {}",
-                    m, expected_bytes, total_layers, dim, dim, mip_data.len()
+                    m,
+                    expected_bytes,
+                    total_layers,
+                    dim,
+                    dim,
+                    mip_data.len()
                 )
                 .into());
             }

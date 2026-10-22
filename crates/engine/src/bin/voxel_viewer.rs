@@ -262,31 +262,41 @@ impl AppState {
         let textures =
             TextureArray::from_assets(&ctx.device, &ctx.queue, &assets.join("textures"))?;
 
-        let pipelines = TerrainPipelines::new(
-            &ctx.device,
-            config.format,
-            wgpu::TextureFormat::Depth24Plus,
-        );
+        let pipelines =
+            TerrainPipelines::new(&ctx.device, config.format, wgpu::TextureFormat::Depth24Plus);
 
         let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
 
         let dummy_cam = CameraUniform::new(glam::Mat4::IDENTITY);
-        let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("camera_uniform_buf"),
-            contents: bytes_of(&dummy_cam),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let camera_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("camera_uniform_buf"),
+                contents: bytes_of(&dummy_cam),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
 
         // Load block registry
-        let reg = Arc::new(BlockRegistry::from_file(&assets.join("registry/block_registry.bin"))?);
-        let air_id = reg.get_block("air").map(|b| b.state_start as u16).unwrap_or(0);
-        let stone_id = reg.get_block("stone").map(|b| b.state_start as u16).unwrap_or(0);
+        let reg = Arc::new(BlockRegistry::from_file(
+            &assets.join("registry/block_registry.bin"),
+        )?);
+        let air_id = reg
+            .get_block("air")
+            .map(|b| b.state_start as u16)
+            .unwrap_or(0);
+        let stone_id = reg
+            .get_block("stone")
+            .map(|b| b.state_start as u16)
+            .unwrap_or(0);
         let grass_id = reg
             .get_block("grass_block")
             .map(|b| b.state_start as u16)
             .unwrap_or(stone_id);
-        let dirt_id = reg.get_block("dirt").map(|b| b.state_start as u16).unwrap_or(stone_id);
+        let dirt_id = reg
+            .get_block("dirt")
+            .map(|b| b.state_start as u16)
+            .unwrap_or(stone_id);
         let glowstone_id = reg
             .get_block("glowstone")
             .map(|b| b.state_start as u16)
@@ -295,13 +305,22 @@ impl AppState {
             .get_block("magma_block")
             .map(|b| b.state_start as u16)
             .unwrap_or(stone_id);
-        let lava_id = reg.get_block("lava").map(|b| b.state_start as u16).unwrap_or(stone_id);
+        let lava_id = reg
+            .get_block("lava")
+            .map(|b| b.state_start as u16)
+            .unwrap_or(stone_id);
         let packed_ice_id = reg
             .get_block("packed_ice")
             .map(|b| b.state_start as u16)
             .unwrap_or(stone_id);
-        let ice_id = reg.get_block("ice").map(|b| b.state_start as u16).unwrap_or(stone_id);
-        let glass_id = reg.get_block("glass").map(|b| b.state_start as u16).unwrap_or(stone_id);
+        let ice_id = reg
+            .get_block("ice")
+            .map(|b| b.state_start as u16)
+            .unwrap_or(stone_id);
+        let glass_id = reg
+            .get_block("glass")
+            .map(|b| b.state_start as u16)
+            .unwrap_or(stone_id);
         let stained_glass_id = reg
             .get_block("white_stained_glass")
             .or_else(|| reg.get_block("cyan_stained_glass"))
@@ -360,7 +379,7 @@ impl AppState {
         for x in 3..=5 {
             for z in 3..=5 {
                 voxels[2][2].set_state(x, 3, z, stone_id); // floor
-                voxels[2][2].set_state(x, 4, z, lava_id);  // animated fluid
+                voxels[2][2].set_state(x, 4, z, lava_id); // animated fluid
             }
         }
         // Border magma blocks around lava pool:
@@ -424,10 +443,26 @@ impl AppState {
             let mut row = Vec::with_capacity(6);
             for cz in 0..6 {
                 let nbrs = NeighborChunkLights {
-                    west: if cx > 0 { Some(&lights[cx - 1][cz].light) } else { None },
-                    east: if cx + 1 < 6 { Some(&lights[cx + 1][cz].light) } else { None },
-                    north: if cz > 0 { Some(&lights[cx][cz - 1].light) } else { None },
-                    south: if cz + 1 < 6 { Some(&lights[cx][cz + 1].light) } else { None },
+                    west: if cx > 0 {
+                        Some(&lights[cx - 1][cz].light)
+                    } else {
+                        None
+                    },
+                    east: if cx + 1 < 6 {
+                        Some(&lights[cx + 1][cz].light)
+                    } else {
+                        None
+                    },
+                    north: if cz > 0 {
+                        Some(&lights[cx][cz - 1].light)
+                    } else {
+                        None
+                    },
+                    south: if cz + 1 < 6 {
+                        Some(&lights[cx][cz + 1].light)
+                    } else {
+                        None
+                    },
                 };
                 let res = recompute_light_column(
                     &voxels[cx][cz],
@@ -450,21 +485,59 @@ impl AppState {
         for cx in 0..6 {
             for cz in 0..6 {
                 let opt_nbrs = OptionalHorizontalNeighbors {
-                    west: if cx > 0 { Some((&voxels[cx - 1][cz], &lights[cx - 1][cz].light)) } else { None },
-                    east: if cx + 1 < 6 { Some((&voxels[cx + 1][cz], &lights[cx + 1][cz].light)) } else { None },
-                    north: if cz > 0 { Some((&voxels[cx][cz - 1], &lights[cx][cz - 1].light)) } else { None },
-                    south: if cz + 1 < 6 { Some((&voxels[cx][cz + 1], &lights[cx][cz + 1].light)) } else { None },
-                    nw: if cx > 0 && cz > 0 { Some((&voxels[cx - 1][cz - 1], &lights[cx - 1][cz - 1].light)) } else { None },
-                    ne: if cx + 1 < 6 && cz > 0 { Some((&voxels[cx + 1][cz - 1], &lights[cx + 1][cz - 1].light)) } else { None },
-                    sw: if cx > 0 && cz + 1 < 6 { Some((&voxels[cx - 1][cz + 1], &lights[cx - 1][cz + 1].light)) } else { None },
-                    se: if cx + 1 < 6 && cz + 1 < 6 { Some((&voxels[cx + 1][cz + 1], &lights[cx + 1][cz + 1].light)) } else { None },
+                    west: if cx > 0 {
+                        Some((&voxels[cx - 1][cz], &lights[cx - 1][cz].light))
+                    } else {
+                        None
+                    },
+                    east: if cx + 1 < 6 {
+                        Some((&voxels[cx + 1][cz], &lights[cx + 1][cz].light))
+                    } else {
+                        None
+                    },
+                    north: if cz > 0 {
+                        Some((&voxels[cx][cz - 1], &lights[cx][cz - 1].light))
+                    } else {
+                        None
+                    },
+                    south: if cz + 1 < 6 {
+                        Some((&voxels[cx][cz + 1], &lights[cx][cz + 1].light))
+                    } else {
+                        None
+                    },
+                    nw: if cx > 0 && cz > 0 {
+                        Some((&voxels[cx - 1][cz - 1], &lights[cx - 1][cz - 1].light))
+                    } else {
+                        None
+                    },
+                    ne: if cx + 1 < 6 && cz > 0 {
+                        Some((&voxels[cx + 1][cz - 1], &lights[cx + 1][cz - 1].light))
+                    } else {
+                        None
+                    },
+                    sw: if cx > 0 && cz + 1 < 6 {
+                        Some((&voxels[cx - 1][cz + 1], &lights[cx - 1][cz + 1].light))
+                    } else {
+                        None
+                    },
+                    se: if cx + 1 < 6 && cz + 1 < 6 {
+                        Some((&voxels[cx + 1][cz + 1], &lights[cx + 1][cz + 1].light))
+                    } else {
+                        None
+                    },
                 };
 
                 // Wait-for-8 halo gate: mesh ONLY when all 8 horizontal neighbors exist
                 if let Some(neighbors) = opt_nbrs.as_complete() {
                     let mut halo = SectionHalo::new();
                     // Section 4 corresponds to y in 0..16 (base_y = 0)
-                    halo.populate(4, &voxels[cx][cz], &lights[cx][cz].light, &neighbors, air_id);
+                    halo.populate(
+                        4,
+                        &voxels[cx][cz],
+                        &lights[cx][cz].light,
+                        &neighbors,
+                        air_id,
+                    );
                     let mesh_res = mesh_section(&halo, &reg);
 
                     total_opaque_vertices += mesh_res.opaque.len() as u32;
@@ -475,11 +548,12 @@ impl AppState {
                     let world_z = cz as f32 * 16.0;
                     let instance = SectionInstance::new(world_x, 0.0, world_z);
                     let instance_buf =
-                        ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some(&format!("section_instance_buf_{cx}_{cz}")),
-                            contents: bytes_of(&instance),
-                            usage: wgpu::BufferUsages::VERTEX,
-                        });
+                        ctx.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(&format!("section_instance_buf_{cx}_{cz}")),
+                                contents: bytes_of(&instance),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
 
                     let opaque_buf = if !mesh_res.opaque.is_empty() {
                         let v_bytes: Vec<u8> = mesh_res
@@ -488,11 +562,12 @@ impl AppState {
                             .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
                             .collect();
                         Some(
-                            ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some(&format!("opaque_vertex_buf_{cx}_{cz}")),
-                                contents: &v_bytes,
-                                usage: wgpu::BufferUsages::VERTEX,
-                            }),
+                            ctx.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some(&format!("opaque_vertex_buf_{cx}_{cz}")),
+                                    contents: &v_bytes,
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                }),
                         )
                     } else {
                         None
@@ -505,11 +580,12 @@ impl AppState {
                             .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
                             .collect();
                         Some(
-                            ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some(&format!("translucent_vertex_buf_{cx}_{cz}")),
-                                contents: &v_bytes,
-                                usage: wgpu::BufferUsages::VERTEX,
-                            }),
+                            ctx.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some(&format!("translucent_vertex_buf_{cx}_{cz}")),
+                                    contents: &v_bytes,
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                }),
                         )
                     } else {
                         None
@@ -672,13 +748,12 @@ impl AppState {
         // decompiled 2026-10-23): walk-sprint speed ratio 0.13/0.1 -> (1.3 + 1)/2 = 1.15
         // exactly. FLY keeps 1.0 (the x2.5 noclip rate is not a vanilla ratio — the
         // formula must NOT be ported literally there). Smoothing is viewer-side.
-        let target = if self.movement_mode == MovementMode::Physics
-            && self.player_physics.is_sprinting
-        {
-            1.15
-        } else {
-            1.0
-        };
+        let target =
+            if self.movement_mode == MovementMode::Physics && self.player_physics.is_sprinting {
+                1.15
+            } else {
+                1.0
+            };
         let t = 1.0 - ((-dt.min(0.1) * 12.0).exp() as f32);
         self.fov_mult += (target - self.fov_mult) * t;
     }
@@ -717,11 +792,9 @@ impl AppState {
         let vp = proj * view_mat;
 
         let camera_uniform = CameraUniform::new_full(vp, self.sky_dampen, self.tick_count);
-        self.ctx.queue.write_buffer(
-            &self.camera_buf,
-            0,
-            bytes_of(&camera_uniform),
-        );
+        self.ctx
+            .queue
+            .write_buffer(&self.camera_buf, 0, bytes_of(&camera_uniform));
 
         let mut encoder = self
             .ctx
@@ -845,11 +918,8 @@ impl ApplicationHandler for ViewerApp {
                     "voxel_viewer",
                     "voxel_viewer",
                 );
-                win_attrs = WindowAttributesExtX11::with_name(
-                    win_attrs,
-                    "voxel_viewer",
-                    "voxel_viewer",
-                );
+                win_attrs =
+                    WindowAttributesExtX11::with_name(win_attrs, "voxel_viewer", "voxel_viewer");
             }
             let window = match event_loop.create_window(win_attrs) {
                 Ok(w) => Arc::new(w),

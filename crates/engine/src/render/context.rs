@@ -50,15 +50,14 @@ impl GpuContext {
         required_limits.max_texture_array_layers = 2048;
         let required_limits = required_limits.using_resolution(adapter.limits());
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("voxel_engine_headless_device"),
                 required_features: wgpu::Features::empty(),
                 required_limits,
                 memory_hints: wgpu::MemoryHints::Performance,
                 ..Default::default()
-            },
-        ))?;
+            }))?;
 
         Ok(Self {
             instance,
@@ -98,15 +97,14 @@ impl GpuContext {
         required_limits.max_texture_array_layers = 2048;
         let required_limits = required_limits.using_resolution(adapter.limits());
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("voxel_engine_windowed_device"),
                 required_features: wgpu::Features::empty(),
                 required_limits,
                 memory_hints: wgpu::MemoryHints::Performance,
                 ..Default::default()
-            },
-        ))?;
+            }))?;
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps

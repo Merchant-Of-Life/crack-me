@@ -4,9 +4,7 @@
 //! triangle buffers with 4-corner AO, sealed-corner light blending, quad diagonal flip,
 //! and 8-neighbor halo boundary access according to SPECS.md Step 3.
 
-use crate::light::{
-    ChunkLightColumn, ChunkVoxelColumn, MAX_Y, MIN_Y, SECTION_COUNT, SECTION_SIZE,
-};
+use crate::light::{ChunkLightColumn, ChunkVoxelColumn, MAX_Y, MIN_Y, SECTION_COUNT, SECTION_SIZE};
 use crate::registry::{
     BlockRegistry, BlockStateEntry, CULL_LEAVES, CULL_OPAQUE, FACE_DOWN, FACE_EAST, FACE_NORTH,
     FACE_SOUTH, FACE_UP, FACE_WEST, MESH_CUBE, MESH_EMPTY, MESH_FLUID,
@@ -106,7 +104,10 @@ impl SectionHalo {
         neighbors: &HorizontalNeighbors,
         air_state_id: u16,
     ) {
-        assert!(section_idx < SECTION_COUNT, "section_idx must be < SECTION_COUNT");
+        assert!(
+            section_idx < SECTION_COUNT,
+            "section_idx must be < SECTION_COUNT"
+        );
         let base_y = MIN_Y + (section_idx as i32) * (SECTION_SIZE as i32);
 
         for rel_y in -1..=16 {
@@ -147,7 +148,10 @@ impl SectionHalo {
             // Cardinal West (rel_x = -1, rel_z ∈ 0..16) -> West neighbor at x = 15
             for rel_z in 0..16 {
                 let v = neighbors.west.0.get_state(15, world_y, rel_z as usize);
-                let l = neighbors.west.1.get_packed_light(15, world_y, rel_z as usize);
+                let l = neighbors
+                    .west
+                    .1
+                    .get_packed_light(15, world_y, rel_z as usize);
                 self.set_voxel(-1, rel_y, rel_z, v);
                 self.set_packed_light(-1, rel_y, rel_z, l);
             }
@@ -155,7 +159,10 @@ impl SectionHalo {
             // Cardinal East (rel_x = 16, rel_z ∈ 0..16) -> East neighbor at x = 0
             for rel_z in 0..16 {
                 let v = neighbors.east.0.get_state(0, world_y, rel_z as usize);
-                let l = neighbors.east.1.get_packed_light(0, world_y, rel_z as usize);
+                let l = neighbors
+                    .east
+                    .1
+                    .get_packed_light(0, world_y, rel_z as usize);
                 self.set_voxel(16, rel_y, rel_z, v);
                 self.set_packed_light(16, rel_y, rel_z, l);
             }
@@ -163,7 +170,10 @@ impl SectionHalo {
             // Cardinal North (rel_z = -1, rel_x ∈ 0..16) -> North neighbor at z = 15
             for rel_x in 0..16 {
                 let v = neighbors.north.0.get_state(rel_x as usize, world_y, 15);
-                let l = neighbors.north.1.get_packed_light(rel_x as usize, world_y, 15);
+                let l = neighbors
+                    .north
+                    .1
+                    .get_packed_light(rel_x as usize, world_y, 15);
                 self.set_voxel(rel_x, rel_y, -1, v);
                 self.set_packed_light(rel_x, rel_y, -1, l);
             }
@@ -171,7 +181,10 @@ impl SectionHalo {
             // Cardinal South (rel_z = 16, rel_x ∈ 0..16) -> South neighbor at z = 0
             for rel_x in 0..16 {
                 let v = neighbors.south.0.get_state(rel_x as usize, world_y, 0);
-                let l = neighbors.south.1.get_packed_light(rel_x as usize, world_y, 0);
+                let l = neighbors
+                    .south
+                    .1
+                    .get_packed_light(rel_x as usize, world_y, 0);
                 self.set_voxel(rel_x, rel_y, 16, v);
                 self.set_packed_light(rel_x, rel_y, 16, l);
             }
@@ -205,14 +218,14 @@ impl SectionHalo {
 
 /// All 8 horizontal neighbor columns required for meshing a section.
 pub struct HorizontalNeighbors<'a> {
-    pub west: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),   // -X
-    pub east: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),   // +X
-    pub north: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),  // -Z
-    pub south: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),  // +Z
-    pub nw: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),     // -X, -Z
-    pub ne: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),     // +X, -Z
-    pub sw: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),     // -X, +Z
-    pub se: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),     // +X, +Z
+    pub west: (&'a ChunkVoxelColumn, &'a ChunkLightColumn), // -X
+    pub east: (&'a ChunkVoxelColumn, &'a ChunkLightColumn), // +X
+    pub north: (&'a ChunkVoxelColumn, &'a ChunkLightColumn), // -Z
+    pub south: (&'a ChunkVoxelColumn, &'a ChunkLightColumn), // +Z
+    pub nw: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),   // -X, -Z
+    pub ne: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),   // +X, -Z
+    pub sw: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),   // -X, +Z
+    pub se: (&'a ChunkVoxelColumn, &'a ChunkLightColumn),   // +X, +Z
 }
 
 /// Optional wrapper enforcing the WAIT-FOR-8 contract (SPECS Step 3 §3).
@@ -260,7 +273,7 @@ pub struct FaceMergeKey {
 /// Result of meshing a single 16³ chunk section into pass streams (Requirement R7).
 #[derive(Clone, Debug, Default)]
 pub struct MeshResult {
-    pub opaque: Vec<PackedVoxelVertex>,      // Pass 1: LAYER_SOLID, LAYER_CUTOUT_MIPPED, LAYER_CUTOUT
+    pub opaque: Vec<PackedVoxelVertex>, // Pass 1: LAYER_SOLID, LAYER_CUTOUT_MIPPED, LAYER_CUTOUT
     pub translucent: Vec<PackedVoxelVertex>, // Pass 2: LAYER_TRANSLUCENT
 }
 
@@ -335,11 +348,14 @@ pub fn compute_corner(
     side2: (i32, i32, i32),
     corner: (i32, i32, i32),
 ) -> (u8, u8, u8) {
-    let s1_state = reg.get_state(halo.get_voxel(side1.0, side1.1, side1.2) as u32)
+    let s1_state = reg
+        .get_state(halo.get_voxel(side1.0, side1.1, side1.2) as u32)
         .unwrap_or_else(|| reg.get_state_unchecked(0));
-    let s2_state = reg.get_state(halo.get_voxel(side2.0, side2.1, side2.2) as u32)
+    let s2_state = reg
+        .get_state(halo.get_voxel(side2.0, side2.1, side2.2) as u32)
         .unwrap_or_else(|| reg.get_state_unchecked(0));
-    let c_state = reg.get_state(halo.get_voxel(corner.0, corner.1, corner.2) as u32)
+    let c_state = reg
+        .get_state(halo.get_voxel(corner.0, corner.1, corner.2) as u32)
         .unwrap_or_else(|| reg.get_state_unchecked(0));
 
     let s1_opaque = s1_state.is_opaque != 0;
@@ -479,11 +495,8 @@ pub fn emit_quad(
 }
 
 #[inline(always)]
-fn greedy_sweep<F>(
-    mask: &[Option<FaceMergeKey>; 256],
-    out: &mut MeshResult,
-    mut emit: F,
-) where
+fn greedy_sweep<F>(mask: &[Option<FaceMergeKey>; 256], out: &mut MeshResult, mut emit: F)
+where
     F: FnMut(&mut MeshResult, usize, usize, usize, usize, &FaceMergeKey),
 {
     let mut visited = [false; 256];
@@ -551,7 +564,9 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
         for z in 0..16 {
             for x in 0..16 {
                 let v_id = halo.get_voxel(x, y, z);
-                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let state = reg
+                    .get_state(v_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if state.mesh_type != MESH_CUBE && state.mesh_type != MESH_FLUID {
                     continue;
                 }
@@ -560,16 +575,46 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
                     continue;
                 }
                 let n_id = halo.get_voxel(x, y + 1, z);
-                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let n_state = reg
+                    .get_state(n_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if should_cull_face(state, n_state) {
                     continue;
                 }
 
                 let center = (x, y + 1, z);
-                let c0 = compute_corner(halo, reg, center, (x - 1, y + 1, z), (x, y + 1, z - 1), (x - 1, y + 1, z - 1));
-                let c1 = compute_corner(halo, reg, center, (x - 1, y + 1, z), (x, y + 1, z + 1), (x - 1, y + 1, z + 1));
-                let c2 = compute_corner(halo, reg, center, (x + 1, y + 1, z), (x, y + 1, z + 1), (x + 1, y + 1, z + 1));
-                let c3 = compute_corner(halo, reg, center, (x + 1, y + 1, z), (x, y + 1, z - 1), (x + 1, y + 1, z - 1));
+                let c0 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y + 1, z),
+                    (x, y + 1, z - 1),
+                    (x - 1, y + 1, z - 1),
+                );
+                let c1 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y + 1, z),
+                    (x, y + 1, z + 1),
+                    (x - 1, y + 1, z + 1),
+                );
+                let c2 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y + 1, z),
+                    (x, y + 1, z + 1),
+                    (x + 1, y + 1, z + 1),
+                );
+                let c3 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y + 1, z),
+                    (x, y + 1, z - 1),
+                    (x + 1, y + 1, z - 1),
+                );
 
                 let pass_bucket = if state.render_layer() >= 3 { 1 } else { 0 };
 
@@ -604,7 +649,9 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
         for z in 0..16 {
             for x in 0..16 {
                 let v_id = halo.get_voxel(x, y, z);
-                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let state = reg
+                    .get_state(v_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if state.mesh_type != MESH_CUBE && state.mesh_type != MESH_FLUID {
                     continue;
                 }
@@ -613,16 +660,46 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
                     continue;
                 }
                 let n_id = halo.get_voxel(x, y - 1, z);
-                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let n_state = reg
+                    .get_state(n_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if should_cull_face(state, n_state) {
                     continue;
                 }
 
                 let center = (x, y - 1, z);
-                let c0 = compute_corner(halo, reg, center, (x - 1, y - 1, z), (x, y - 1, z + 1), (x - 1, y - 1, z + 1));
-                let c1 = compute_corner(halo, reg, center, (x - 1, y - 1, z), (x, y - 1, z - 1), (x - 1, y - 1, z - 1));
-                let c2 = compute_corner(halo, reg, center, (x + 1, y - 1, z), (x, y - 1, z - 1), (x + 1, y - 1, z - 1));
-                let c3 = compute_corner(halo, reg, center, (x + 1, y - 1, z), (x, y - 1, z + 1), (x + 1, y - 1, z + 1));
+                let c0 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y - 1, z),
+                    (x, y - 1, z + 1),
+                    (x - 1, y - 1, z + 1),
+                );
+                let c1 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y - 1, z),
+                    (x, y - 1, z - 1),
+                    (x - 1, y - 1, z - 1),
+                );
+                let c2 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y - 1, z),
+                    (x, y - 1, z - 1),
+                    (x + 1, y - 1, z - 1),
+                );
+                let c3 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y - 1, z),
+                    (x, y - 1, z + 1),
+                    (x + 1, y - 1, z + 1),
+                );
 
                 let pass_bucket = if state.render_layer() >= 3 { 1 } else { 0 };
 
@@ -657,7 +734,9 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
         for y in 0..16 {
             for x in 0..16 {
                 let v_id = halo.get_voxel(x, y, z);
-                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let state = reg
+                    .get_state(v_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if state.mesh_type != MESH_CUBE && state.mesh_type != MESH_FLUID {
                     continue;
                 }
@@ -666,16 +745,46 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
                     continue;
                 }
                 let n_id = halo.get_voxel(x, y, z + 1);
-                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let n_state = reg
+                    .get_state(n_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if should_cull_face(state, n_state) {
                     continue;
                 }
 
                 let center = (x, y, z + 1);
-                let c0 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x, y + 1, z + 1), (x - 1, y + 1, z + 1));
-                let c1 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x, y - 1, z + 1), (x - 1, y - 1, z + 1));
-                let c2 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x, y - 1, z + 1), (x + 1, y - 1, z + 1));
-                let c3 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x, y + 1, z + 1), (x + 1, y + 1, z + 1));
+                let c0 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z + 1),
+                    (x, y + 1, z + 1),
+                    (x - 1, y + 1, z + 1),
+                );
+                let c1 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z + 1),
+                    (x, y - 1, z + 1),
+                    (x - 1, y - 1, z + 1),
+                );
+                let c2 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z + 1),
+                    (x, y - 1, z + 1),
+                    (x + 1, y - 1, z + 1),
+                );
+                let c3 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z + 1),
+                    (x, y + 1, z + 1),
+                    (x + 1, y + 1, z + 1),
+                );
 
                 let pass_bucket = if state.render_layer() >= 3 { 1 } else { 0 };
 
@@ -710,7 +819,9 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
         for y in 0..16 {
             for x in 0..16 {
                 let v_id = halo.get_voxel(x, y, z);
-                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let state = reg
+                    .get_state(v_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if state.mesh_type != MESH_CUBE && state.mesh_type != MESH_FLUID {
                     continue;
                 }
@@ -719,16 +830,46 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
                     continue;
                 }
                 let n_id = halo.get_voxel(x, y, z - 1);
-                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let n_state = reg
+                    .get_state(n_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if should_cull_face(state, n_state) {
                     continue;
                 }
 
                 let center = (x, y, z - 1);
-                let c0 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x, y + 1, z - 1), (x + 1, y + 1, z - 1));
-                let c1 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x, y - 1, z - 1), (x + 1, y - 1, z - 1));
-                let c2 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x, y - 1, z - 1), (x - 1, y - 1, z - 1));
-                let c3 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x, y + 1, z - 1), (x - 1, y + 1, z - 1));
+                let c0 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z - 1),
+                    (x, y + 1, z - 1),
+                    (x + 1, y + 1, z - 1),
+                );
+                let c1 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z - 1),
+                    (x, y - 1, z - 1),
+                    (x + 1, y - 1, z - 1),
+                );
+                let c2 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z - 1),
+                    (x, y - 1, z - 1),
+                    (x - 1, y - 1, z - 1),
+                );
+                let c3 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z - 1),
+                    (x, y + 1, z - 1),
+                    (x - 1, y + 1, z - 1),
+                );
 
                 let pass_bucket = if state.render_layer() >= 3 { 1 } else { 0 };
 
@@ -763,7 +904,9 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
         for y in 0..16 {
             for z in 0..16 {
                 let v_id = halo.get_voxel(x, y, z);
-                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let state = reg
+                    .get_state(v_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if state.mesh_type != MESH_CUBE && state.mesh_type != MESH_FLUID {
                     continue;
                 }
@@ -772,16 +915,46 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
                     continue;
                 }
                 let n_id = halo.get_voxel(x + 1, y, z);
-                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let n_state = reg
+                    .get_state(n_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if should_cull_face(state, n_state) {
                     continue;
                 }
 
                 let center = (x + 1, y, z);
-                let c0 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x + 1, y + 1, z), (x + 1, y + 1, z + 1));
-                let c1 = compute_corner(halo, reg, center, (x + 1, y, z + 1), (x + 1, y - 1, z), (x + 1, y - 1, z + 1));
-                let c2 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x + 1, y - 1, z), (x + 1, y - 1, z - 1));
-                let c3 = compute_corner(halo, reg, center, (x + 1, y, z - 1), (x + 1, y + 1, z), (x + 1, y + 1, z - 1));
+                let c0 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z + 1),
+                    (x + 1, y + 1, z),
+                    (x + 1, y + 1, z + 1),
+                );
+                let c1 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z + 1),
+                    (x + 1, y - 1, z),
+                    (x + 1, y - 1, z + 1),
+                );
+                let c2 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z - 1),
+                    (x + 1, y - 1, z),
+                    (x + 1, y - 1, z - 1),
+                );
+                let c3 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x + 1, y, z - 1),
+                    (x + 1, y + 1, z),
+                    (x + 1, y + 1, z - 1),
+                );
 
                 let pass_bucket = if state.render_layer() >= 3 { 1 } else { 0 };
 
@@ -816,7 +989,9 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
         for y in 0..16 {
             for z in 0..16 {
                 let v_id = halo.get_voxel(x, y, z);
-                let state = reg.get_state(v_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let state = reg
+                    .get_state(v_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if state.mesh_type != MESH_CUBE && state.mesh_type != MESH_FLUID {
                     continue;
                 }
@@ -825,16 +1000,46 @@ pub fn mesh_section_into(halo: &SectionHalo, reg: &BlockRegistry, out: &mut Mesh
                     continue;
                 }
                 let n_id = halo.get_voxel(x - 1, y, z);
-                let n_state = reg.get_state(n_id as u32).unwrap_or_else(|| reg.get_state_unchecked(0));
+                let n_state = reg
+                    .get_state(n_id as u32)
+                    .unwrap_or_else(|| reg.get_state_unchecked(0));
                 if should_cull_face(state, n_state) {
                     continue;
                 }
 
                 let center = (x - 1, y, z);
-                let c0 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x - 1, y + 1, z), (x - 1, y + 1, z - 1));
-                let c1 = compute_corner(halo, reg, center, (x - 1, y, z - 1), (x - 1, y - 1, z), (x - 1, y - 1, z - 1));
-                let c2 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x - 1, y - 1, z), (x - 1, y - 1, z + 1));
-                let c3 = compute_corner(halo, reg, center, (x - 1, y, z + 1), (x - 1, y + 1, z), (x - 1, y + 1, z + 1));
+                let c0 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z - 1),
+                    (x - 1, y + 1, z),
+                    (x - 1, y + 1, z - 1),
+                );
+                let c1 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z - 1),
+                    (x - 1, y - 1, z),
+                    (x - 1, y - 1, z - 1),
+                );
+                let c2 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z + 1),
+                    (x - 1, y - 1, z),
+                    (x - 1, y - 1, z + 1),
+                );
+                let c3 = compute_corner(
+                    halo,
+                    reg,
+                    center,
+                    (x - 1, y, z + 1),
+                    (x - 1, y + 1, z),
+                    (x - 1, y + 1, z + 1),
+                );
 
                 let pass_bucket = if state.render_layer() >= 3 { 1 } else { 0 };
 
@@ -874,7 +1079,12 @@ pub fn mesh_section_with_neighbors(
     air_state_id: u16,
 ) -> MeshResult {
     let mut halo = SectionHalo::new();
-    halo.populate(section_idx, center_voxels, center_light, neighbors, air_state_id);
+    halo.populate(
+        section_idx,
+        center_voxels,
+        center_light,
+        neighbors,
+        air_state_id,
+    );
     mesh_section(&halo, reg)
 }
-

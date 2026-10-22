@@ -94,7 +94,11 @@ impl std::fmt::Display for RegistryError {
             Self::UnsupportedVersion(v) => write!(f, "unsupported registry version: {}", v),
             Self::CorruptHeader => write!(f, "corrupt registry header"),
             Self::UnexpectedEof { expected, actual } => {
-                write!(f, "unexpected EOF: expected {} bytes, got {}", expected, actual)
+                write!(
+                    f,
+                    "unexpected EOF: expected {} bytes, got {}",
+                    expected, actual
+                )
             }
             Self::InvalidUtf8 => write!(f, "invalid UTF-8 in block names blob"),
         }
@@ -136,7 +140,10 @@ impl BlockRegistry {
         let state_count = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
         let names_len = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
 
-        let expected_total = HEADER_BYTES + names_len + block_count * INDEX_ENTRY_BYTES + state_count * STATE_ENTRY_BYTES;
+        let expected_total = HEADER_BYTES
+            + names_len
+            + block_count * INDEX_ENTRY_BYTES
+            + state_count * STATE_ENTRY_BYTES;
         if bytes.len() < expected_total {
             return Err(RegistryError::UnexpectedEof {
                 expected: expected_total,
@@ -157,7 +164,8 @@ impl BlockRegistry {
             let name_off = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
             let name_len = u32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap());
             let state_start = u32::from_le_bytes(bytes[off + 8..off + 12].try_into().unwrap());
-            let state_count_entry = u32::from_le_bytes(bytes[off + 12..off + 16].try_into().unwrap());
+            let state_count_entry =
+                u32::from_le_bytes(bytes[off + 12..off + 16].try_into().unwrap());
             let mesh_type = bytes[off + 16];
             let has_variants = bytes[off + 17];
             let pad = u16::from_le_bytes(bytes[off + 18..off + 20].try_into().unwrap());

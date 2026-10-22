@@ -1,6 +1,8 @@
 use std::path::Path;
 use voxel_engine::mesher::{emit_quad, FaceMergeKey};
-use voxel_engine::registry::{BlockRegistry, FACE_DOWN, FACE_EAST, FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST};
+use voxel_engine::registry::{
+    BlockRegistry, FACE_DOWN, FACE_EAST, FACE_NORTH, FACE_SOUTH, FACE_UP, FACE_WEST,
+};
 use voxel_engine::render::{
     validate_adapter_limits, Camera, CameraUniform, GpuContext, OffscreenTarget, SectionInstance,
     TerrainPipelines, TextureArray, UnpackedVoxelVertex,
@@ -96,7 +98,10 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
     let ctx = match GpuContext::new_headless() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Skipping GPU compute unpack check (no headless adapter): {}", e);
+            eprintln!(
+                "Skipping GPU compute unpack check (no headless adapter): {}",
+                e
+            );
             return;
         }
     };
@@ -163,10 +168,12 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
     "#
     );
 
-    let shader = ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("test_unpack_shader"),
-        source: wgpu::ShaderSource::Wgsl(wgsl_compute.into()),
-    });
+    let shader = ctx
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("test_unpack_shader"),
+            source: wgpu::ShaderSource::Wgsl(wgsl_compute.into()),
+        });
 
     let count = packed_verts.len();
     let packed_bytes: Vec<u8> = packed_verts
@@ -175,11 +182,13 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
         .collect();
 
     use wgpu::util::DeviceExt;
-    let in_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("in_packed_buf"),
-        contents: &packed_bytes,
-        usage: wgpu::BufferUsages::STORAGE,
-    });
+    let in_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("in_packed_buf"),
+            contents: &packed_bytes,
+            usage: wgpu::BufferUsages::STORAGE,
+        });
 
     // 12 fields of 4 bytes each = 48 bytes per vertex
     let out_buf_size = (count * 48) as wgpu::BufferAddress;
@@ -197,31 +206,33 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
         mapped_at_creation: false,
     });
 
-    let bind_group_layout = ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: None,
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+    let bind_group_layout = ctx
+        .device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            },
-        ],
-    });
+            ],
+        });
 
     let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -238,22 +249,28 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
         ],
     });
 
-    let pipeline_layout = ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
-        bind_group_layouts: &[Some(&bind_group_layout)],
-        immediate_size: 0,
-    });
+    let pipeline_layout = ctx
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
 
-    let pipeline = ctx.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("unpack_pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: Some("main"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
+    let pipeline = ctx
+        .device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("unpack_pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
 
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
         pass.set_pipeline(&pipeline);
@@ -287,14 +304,30 @@ fn test_wgsl_bit_exact_unpack_matches_cpu() {
         assert_eq!(gpu_x, cpu.local_x, "local_x mismatch at index {}", i);
         assert_eq!(gpu_y, cpu.local_y, "local_y mismatch at index {}", i);
         assert_eq!(gpu_z, cpu.local_z, "local_z mismatch at index {}", i);
-        assert_eq!(gpu_normal, cpu.normal_id, "normal_id mismatch at index {}", i);
+        assert_eq!(
+            gpu_normal, cpu.normal_id,
+            "normal_id mismatch at index {}",
+            i
+        );
         assert_eq!(gpu_tint, cpu.tint_mode, "tint_mode mismatch at index {}", i);
         assert_eq!(gpu_rot, cpu.uv_rot, "uv_rot mismatch at index {}", i);
-        assert_eq!(gpu_bl, cpu.block_light, "block_light mismatch at index {}", i);
+        assert_eq!(
+            gpu_bl, cpu.block_light,
+            "block_light mismatch at index {}",
+            i
+        );
         assert_eq!(gpu_sl, cpu.sky_light, "sky_light mismatch at index {}", i);
         assert_eq!(gpu_ao, cpu.ao, "ao mismatch at index {}", i);
-        assert_eq!(gpu_layer, cpu.base_layer, "base_layer mismatch at index {}", i);
-        assert_eq!(gpu_dry, cpu.dry_foliage, "dry_foliage mismatch at index {}", i);
+        assert_eq!(
+            gpu_layer, cpu.base_layer,
+            "base_layer mismatch at index {}",
+            i
+        );
+        assert_eq!(
+            gpu_dry, cpu.dry_foliage,
+            "dry_foliage mismatch at index {}",
+            i
+        );
     }
 
     drop(data);
@@ -314,7 +347,10 @@ fn test_shader_light_curve_matches_formula() {
         let brightness = l / (4.0 - 3.0 * l);
 
         assert!(brightness >= 0.0 && brightness <= 1.0);
-        assert!(brightness > prev_brightness, "brightness curve must be strictly increasing");
+        assert!(
+            brightness > prev_brightness,
+            "brightness curve must be strictly increasing"
+        );
         prev_brightness = brightness;
 
         if lit == 0 {
@@ -362,11 +398,13 @@ fn test_headless_offscreen_render_solid_cube() {
 
     use wgpu::util::DeviceExt;
     let camera_uniform = camera.build_uniform();
-    let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("camera_uniform_buf"),
-        contents: bytemuck::bytes_of(&camera_uniform),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let camera_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera_uniform_buf"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
     let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
     let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
@@ -390,42 +428,96 @@ fn test_headless_offscreen_render_solid_cube() {
     };
     // Emit all 6 faces using the mesher's canonical quad winding:
     // 0: FACE_UP (+Y, y = 1)
-    emit_quad(&mut vertices, (0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0), FACE_UP as u32, &key_up);
+    emit_quad(
+        &mut vertices,
+        (0, 1, 0),
+        (0, 1, 1),
+        (1, 1, 1),
+        (1, 1, 0),
+        FACE_UP as u32,
+        &key_up,
+    );
 
     // 1: FACE_DOWN (-Y, y = 0)
-    emit_quad(&mut vertices, (0, 0, 1), (0, 0, 0), (1, 0, 0), (1, 0, 1), FACE_DOWN as u32, &key_up);
+    emit_quad(
+        &mut vertices,
+        (0, 0, 1),
+        (0, 0, 0),
+        (1, 0, 0),
+        (1, 0, 1),
+        FACE_DOWN as u32,
+        &key_up,
+    );
 
     // 2: FACE_SOUTH (+Z, z = 1)
-    emit_quad(&mut vertices, (0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1), FACE_SOUTH as u32, &key_up);
+    emit_quad(
+        &mut vertices,
+        (0, 1, 1),
+        (0, 0, 1),
+        (1, 0, 1),
+        (1, 1, 1),
+        FACE_SOUTH as u32,
+        &key_up,
+    );
 
     // 3: FACE_NORTH (-Z, z = 0)
-    emit_quad(&mut vertices, (1, 1, 0), (1, 0, 0), (0, 0, 0), (0, 1, 0), FACE_NORTH as u32, &key_up);
+    emit_quad(
+        &mut vertices,
+        (1, 1, 0),
+        (1, 0, 0),
+        (0, 0, 0),
+        (0, 1, 0),
+        FACE_NORTH as u32,
+        &key_up,
+    );
 
     // 4: FACE_EAST (+X, x = 1)
-    emit_quad(&mut vertices, (1, 1, 1), (1, 0, 1), (1, 0, 0), (1, 1, 0), FACE_EAST as u32, &key_up);
+    emit_quad(
+        &mut vertices,
+        (1, 1, 1),
+        (1, 0, 1),
+        (1, 0, 0),
+        (1, 1, 0),
+        FACE_EAST as u32,
+        &key_up,
+    );
 
     // 5: FACE_WEST (-X, x = 0)
-    emit_quad(&mut vertices, (0, 1, 0), (0, 0, 0), (0, 0, 1), (0, 1, 1), FACE_WEST as u32, &key_up);
+    emit_quad(
+        &mut vertices,
+        (0, 1, 0),
+        (0, 0, 0),
+        (0, 0, 1),
+        (0, 1, 1),
+        FACE_WEST as u32,
+        &key_up,
+    );
 
     let v_bytes: Vec<u8> = vertices
         .iter()
         .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
         .collect();
 
-    let vertex_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("cube_vertex_buf"),
-        contents: &v_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let vertex_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cube_vertex_buf"),
+            contents: &v_bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
     let instance = SectionInstance::new(0.0, 0.0, 0.0);
-    let instance_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("cube_instance_buf"),
-        contents: bytemuck::bytes_of(&instance),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let instance_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("cube_instance_buf"),
+            contents: bytemuck::bytes_of(&instance),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("pass1_opaque_cube"),
@@ -469,8 +561,15 @@ fn test_headless_offscreen_render_solid_cube() {
     let pixels = target.readback_pixels(&ctx.device, &ctx.queue);
 
     // Verify non-zero rendered pixels exist
-    let rendered_count = pixels.chunks_exact(4).filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0).count();
-    assert!(rendered_count > 500, "rendered cube must have visible pixels (got {})", rendered_count);
+    let rendered_count = pixels
+        .chunks_exact(4)
+        .filter(|p| p[0] > 0 || p[1] > 0 || p[2] > 0)
+        .count();
+    assert!(
+        rendered_count > 500,
+        "rendered cube must have visible pixels (got {})",
+        rendered_count
+    );
 
     let mut top_face_samples = Vec::new();
     let mut south_face_samples = Vec::new();
@@ -510,15 +609,27 @@ fn test_headless_offscreen_render_solid_cube() {
         }
     }
 
-    assert!(!top_face_samples.is_empty(), "must sample pixels from top face");
-    assert!(!south_face_samples.is_empty(), "must sample pixels from south face");
-    assert!(!east_face_samples.is_empty(), "must sample pixels from east face");
+    assert!(
+        !top_face_samples.is_empty(),
+        "must sample pixels from top face"
+    );
+    assert!(
+        !south_face_samples.is_empty(),
+        "must sample pixels from south face"
+    );
+    assert!(
+        !east_face_samples.is_empty(),
+        "must sample pixels from east face"
+    );
 
     let avg_top = top_face_samples.iter().sum::<f32>() / top_face_samples.len() as f32;
     let avg_south = south_face_samples.iter().sum::<f32>() / south_face_samples.len() as f32;
     let avg_east = east_face_samples.iter().sum::<f32>() / east_face_samples.len() as f32;
 
-    println!("Directional Shading Observed: Top={:.1}, South={:.1}, East={:.1}", avg_top, avg_south, avg_east);
+    println!(
+        "Directional Shading Observed: Top={:.1}, South={:.1}, East={:.1}",
+        avg_top, avg_south, avg_east
+    );
 
     // Directional shading contract: Top (1.0) > South (0.8) > East (0.6)
     assert!(
@@ -566,8 +677,9 @@ fn test_headless_cutout_alpha_discard() {
     let m3 = vec![255u8; 2 * 2 * 4 * 2];
     let m4 = vec![255u8; 1 * 1 * 4 * 2];
 
-    let textures = TextureArray::from_mip_buffers(&ctx.device, &ctx.queue, 2, [&m0, &m1, &m2, &m3, &m4])
-        .expect("TextureArray creation");
+    let textures =
+        TextureArray::from_mip_buffers(&ctx.device, &ctx.queue, 2, [&m0, &m1, &m2, &m3, &m4])
+            .expect("TextureArray creation");
 
     let pipelines = TerrainPipelines::new(
         &ctx.device,
@@ -578,18 +690,16 @@ fn test_headless_cutout_alpha_discard() {
     let target = OffscreenTarget::new(&ctx.device, 128, 128);
 
     // Orthogonal camera looking straight down -Z at (0, 0, 0)
-    let camera = Camera::new(
-        glam::vec3(0.5, 0.5, 3.0),
-        glam::vec3(0.5, 0.5, 0.0),
-        1.0,
-    );
+    let camera = Camera::new(glam::vec3(0.5, 0.5, 3.0), glam::vec3(0.5, 0.5, 0.0), 1.0);
 
     use wgpu::util::DeviceExt;
-    let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::bytes_of(&camera.build_uniform()),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let camera_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::bytes_of(&camera.build_uniform()),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
     let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
     let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
@@ -608,28 +718,42 @@ fn test_headless_cutout_alpha_discard() {
         corner_sky: [15, 15, 15, 15],
         corner_block: [0, 0, 0, 0],
     };
-    emit_quad(&mut vertices, (0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1), FACE_SOUTH as u32, &key_fg);
+    emit_quad(
+        &mut vertices,
+        (0, 1, 1),
+        (0, 0, 1),
+        (1, 0, 1),
+        (1, 1, 1),
+        FACE_SOUTH as u32,
+        &key_fg,
+    );
 
     let v_bytes: Vec<u8> = vertices
         .iter()
         .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
         .collect();
 
-    let vertex_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: &v_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let vertex_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: &v_bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
     let instance = SectionInstance::new(0.0, 0.0, 0.0);
-    let instance_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::bytes_of(&instance),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let instance_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::bytes_of(&instance),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
     // Render with background cleared to green [0, 255, 0]
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("cutout_pass"),
@@ -678,10 +802,20 @@ fn test_headless_cutout_alpha_discard() {
     let bottom_pixel = &pixels[(75 * 128 + 64) * 4..((75 * 128 + 64) * 4 + 4)];
 
     // Top pixel must be rendered foreground (non-green / R=G=B white)
-    assert!(top_pixel[0] > 50, "top pixel must render foreground (got R={})", top_pixel[0]);
+    assert!(
+        top_pixel[0] > 50,
+        "top pixel must render foreground (got R={})",
+        top_pixel[0]
+    );
     // Bottom pixel must be cleared background (G=255, R=0) due to alpha discard
-    assert_eq!(bottom_pixel[0], 0, "bottom pixel must have discarded foreground: R must be 0");
-    assert_eq!(bottom_pixel[1], 255, "bottom pixel must preserve clear green background: G must be 255");
+    assert_eq!(
+        bottom_pixel[0], 0,
+        "bottom pixel must have discarded foreground: R must be 0"
+    );
+    assert_eq!(
+        bottom_pixel[1], 255,
+        "bottom pixel must preserve clear green background: G must be 255"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -707,18 +841,16 @@ fn test_headless_translucent_pass_two_sided() {
     let target = OffscreenTarget::new(&ctx.device, 128, 128);
 
     // Camera at (0.5, 0.5, 3.0) looking at (0.5, 0.5, 0.0)
-    let camera = Camera::new(
-        glam::vec3(0.5, 0.5, 3.0),
-        glam::vec3(0.5, 0.5, 0.0),
-        1.0,
-    );
+    let camera = Camera::new(glam::vec3(0.5, 0.5, 3.0), glam::vec3(0.5, 0.5, 0.0), 1.0);
 
     use wgpu::util::DeviceExt;
-    let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::bytes_of(&camera.build_uniform()),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let camera_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::bytes_of(&camera.build_uniform()),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
     let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
     let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &dummy_textures);
@@ -736,28 +868,42 @@ fn test_headless_translucent_pass_two_sided() {
         corner_sky: [15, 15, 15, 15],
         corner_block: [0, 0, 0, 0],
     };
-    emit_quad(&mut vertices, (1, 0, 0), (0, 0, 0), (0, 1, 0), (1, 1, 0), FACE_NORTH as u32, &key);
+    emit_quad(
+        &mut vertices,
+        (1, 0, 0),
+        (0, 0, 0),
+        (0, 1, 0),
+        (1, 1, 0),
+        FACE_NORTH as u32,
+        &key,
+    );
 
     let v_bytes: Vec<u8> = vertices
         .iter()
         .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
         .collect();
 
-    let vertex_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: &v_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let vertex_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: &v_bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
     let instance = SectionInstance::new(0.0, 0.0, 0.0);
-    let instance_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: None,
-        contents: bytemuck::bytes_of(&instance),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let instance_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: bytemuck::bytes_of(&instance),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
     // 1. In Pass 1 (Opaque): cull_mode: Some(Face::Back). The back-facing quad MUST be culled.
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("pass1_cull_test"),
@@ -792,11 +938,18 @@ fn test_headless_translucent_pass_two_sided() {
     }
     ctx.queue.submit(std::iter::once(encoder.finish()));
     let pixels_pass1 = target.readback_pixels(&ctx.device, &ctx.queue);
-    let pass1_visible = pixels_pass1.chunks_exact(4).any(|p| p[0] > 0 || p[1] > 0 || p[2] > 0);
-    assert!(!pass1_visible, "Pass 1 must cull back-facing quad with cull_mode: Some(Face::Back)");
+    let pass1_visible = pixels_pass1
+        .chunks_exact(4)
+        .any(|p| p[0] > 0 || p[1] > 0 || p[2] > 0);
+    assert!(
+        !pass1_visible,
+        "Pass 1 must cull back-facing quad with cull_mode: Some(Face::Back)"
+    );
 
     // 2. In Pass 2 (Translucent): cull_mode: None (two-sided). The back-facing quad MUST render!
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("pass2_two_sided_test"),
@@ -831,8 +984,13 @@ fn test_headless_translucent_pass_two_sided() {
     }
     ctx.queue.submit(std::iter::once(encoder.finish()));
     let pixels_pass2 = target.readback_pixels(&ctx.device, &ctx.queue);
-    let pass2_visible = pixels_pass2.chunks_exact(4).any(|p| p[0] > 0 || p[1] > 0 || p[2] > 0);
-    assert!(pass2_visible, "Pass 2 must render back-facing quad with cull_mode: None (two-sided)");
+    let pass2_visible = pixels_pass2
+        .chunks_exact(4)
+        .any(|p| p[0] > 0 || p[1] > 0 || p[2] > 0);
+    assert!(
+        pass2_visible,
+        "Pass 2 must render back-facing quad with cull_mode: None (two-sided)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -870,11 +1028,13 @@ fn test_golden_runtime_tint_matches_bake_apply_linear_tint() {
     let camera_uniform = CameraUniform::new(proj * view);
 
     use wgpu::util::DeviceExt;
-    let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("tint_camera_uniform_buf"),
-        contents: bytemuck::bytes_of(&camera_uniform),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let camera_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tint_camera_uniform_buf"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
     let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
     let texture_bind_group = pipelines.create_texture_bind_group(&ctx.device, &textures);
@@ -897,27 +1057,41 @@ fn test_golden_runtime_tint_matches_bake_apply_linear_tint() {
     };
 
     let mut vertices: Vec<PackedVoxelVertex> = Vec::new();
-    emit_quad(&mut vertices, (0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0), FACE_UP as u32, &key);
+    emit_quad(
+        &mut vertices,
+        (0, 1, 0),
+        (0, 1, 1),
+        (1, 1, 1),
+        (1, 1, 0),
+        FACE_UP as u32,
+        &key,
+    );
 
     let v_bytes: Vec<u8> = vertices
         .iter()
         .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
         .collect();
 
-    let vertex_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("tint_vertex_buf"),
-        contents: &v_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let vertex_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tint_vertex_buf"),
+            contents: &v_bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
     let instance = SectionInstance::new(0.0, 0.0, 0.0);
-    let instance_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("tint_instance_buf"),
-        contents: bytemuck::bytes_of(&instance),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let instance_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tint_instance_buf"),
+            contents: bytemuck::bytes_of(&instance),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("pass_tint_golden"),
@@ -960,7 +1134,11 @@ fn test_golden_runtime_tint_matches_bake_apply_linear_tint() {
     let raw_texels = &mip0[630 * 1024..631 * 1024];
     let expected = asset_pipeline::apply_linear_tint(raw_texels, 0x79C05A);
 
-    assert_eq!(pixels.len(), expected.len(), "framebuffer size must match 16x16 RGBA8");
+    assert_eq!(
+        pixels.len(),
+        expected.len(),
+        "framebuffer size must match 16x16 RGBA8"
+    );
 
     // Exact byte equality comparison across all 256 texels (1024 bytes)
     let mut exact_matches = 0;
@@ -976,11 +1154,21 @@ fn test_golden_runtime_tint_matches_bake_apply_linear_tint() {
             off_by_one += 1;
         } else {
             let byte_idx = i % 4;
-            let channel = match byte_idx { 0 => "R", 1 => "G", 2 => "B", _ => "A" };
+            let channel = match byte_idx {
+                0 => "R",
+                1 => "G",
+                2 => "B",
+                _ => "A",
+            };
             let pixel_idx = i / 4;
             larger_diffs.push(format!(
                 "pixel {} ({},{} channel {}): actual {} vs expected {}",
-                pixel_idx, pixel_idx % 16, pixel_idx / 16, channel, actual, exp
+                pixel_idx,
+                pixel_idx % 16,
+                pixel_idx / 16,
+                channel,
+                actual,
+                exp
             ));
         }
     }
@@ -997,7 +1185,10 @@ fn test_golden_runtime_tint_matches_bake_apply_linear_tint() {
     );
 
     if off_by_one == 0 {
-        assert_eq!(pixels, expected, "GPU runtime tint must match CPU apply_linear_tint byte-for-byte");
+        assert_eq!(
+            pixels, expected,
+            "GPU runtime tint must match CPU apply_linear_tint byte-for-byte"
+        );
     }
 }
 
@@ -1018,20 +1209,26 @@ fn render_quads_to_target(
         .flat_map(|v| [v.word0.to_ne_bytes(), v.word1.to_ne_bytes()].concat())
         .collect();
 
-    let vertex_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("render_quads_vertex_buf"),
-        contents: &v_bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let vertex_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("render_quads_vertex_buf"),
+            contents: &v_bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
     let instance = SectionInstance::new(0.0, 0.0, 0.0);
-    let instance_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("render_quads_instance_buf"),
-        contents: bytemuck::bytes_of(&instance),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let instance_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("render_quads_instance_buf"),
+            contents: bytemuck::bytes_of(&instance),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
 
-    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("render_quads_pass"),
@@ -1125,11 +1322,13 @@ fn test_greedy_quad_tiling_stone_16x16_and_2x1() {
         let proj = glam::Mat4::orthographic_rh(-8.0, 8.0, -8.0, 8.0, 0.1, 50.0);
         let camera_uniform = CameraUniform::new(proj * view);
 
-        let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("camera_buf_16x16"),
-            contents: bytemuck::bytes_of(&camera_uniform),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let camera_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("camera_buf_16x16"),
+                contents: bytemuck::bytes_of(&camera_uniform),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
 
         // 1. Merged 16x16 quad
@@ -1208,11 +1407,13 @@ fn test_greedy_quad_tiling_stone_16x16_and_2x1() {
         let proj = glam::Mat4::orthographic_rh(-1.0, 1.0, -0.5, 0.5, 0.1, 10.0);
         let camera_uniform = CameraUniform::new(proj * view);
 
-        let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("camera_buf_2x1"),
-            contents: bytemuck::bytes_of(&camera_uniform),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let camera_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("camera_buf_2x1"),
+                contents: bytemuck::bytes_of(&camera_uniform),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
 
         // 1. Merged 2x1 quad
@@ -1331,11 +1532,13 @@ fn test_greedy_quad_axis_rotated_oak_log_4x1() {
     let camera_uniform = CameraUniform::new(proj * view);
 
     use wgpu::util::DeviceExt;
-    let camera_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("camera_buf_4x1_log"),
-        contents: bytemuck::bytes_of(&camera_uniform),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let camera_buf = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera_buf_4x1_log"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
     let camera_bind_group = pipelines.create_camera_bind_group(&ctx.device, &camera_buf);
 
     // 1. Merged 4x1 rotated quad
@@ -1499,11 +1702,13 @@ fn test_headless_sky_dampen_night_preserves_block_light() {
 
     // 1. Render at sky_dampen = 0 (day)
     let cam_day = CameraUniform::new_full(vp, 0, 0);
-    let buf_day = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("camera_buf_day"),
-        contents: bytemuck::bytes_of(&cam_day),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let buf_day = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera_buf_day"),
+            contents: bytemuck::bytes_of(&cam_day),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
     let bind_day = pipelines.create_camera_bind_group(&ctx.device, &buf_day);
     let pixels_day = render_quads_to_target(
         &ctx,
@@ -1516,11 +1721,13 @@ fn test_headless_sky_dampen_night_preserves_block_light() {
 
     // 2. Render at sky_dampen = 15 (night)
     let cam_night = CameraUniform::new_full(vp, 15, 0);
-    let buf_night = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("camera_buf_night"),
-        contents: bytemuck::bytes_of(&cam_night),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let buf_night = ctx
+        .device
+        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera_buf_night"),
+            contents: bytemuck::bytes_of(&cam_night),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
     let bind_night = pipelines.create_camera_bind_group(&ctx.device, &buf_night);
     let pixels_night = render_quads_to_target(
         &ctx,
@@ -1622,11 +1829,13 @@ fn test_animation_frame_golden() {
 
     let render_at_tick = |tick: u32| -> Vec<u8> {
         let cam = CameraUniform::new_full(vp, 0, tick);
-        let cam_buf = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("camera_buf_anim"),
-            contents: bytemuck::bytes_of(&cam),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let cam_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("camera_buf_anim"),
+                contents: bytemuck::bytes_of(&cam),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
         let cam_bind = pipelines.create_camera_bind_group(&ctx.device, &cam_buf);
         render_quads_to_target(
             &ctx,
@@ -1707,12 +1916,17 @@ fn test_f8_registry_wide_face_layers_valid_and_not_animated_non_base() {
             assert!(
                 layer < total_layers,
                 "State {} face {} references out-of-bounds layer {} (total_layers={})",
-                s_idx, f_idx, layer, total_layers
+                s_idx,
+                f_idx,
+                layer,
+                total_layers
             );
             assert!(
                 valid_bases.contains(&layer),
                 "State {} face {} layer {} is not a declared base layer in manifest['textures']",
-                s_idx, f_idx, layer
+                s_idx,
+                f_idx,
+                layer
             );
             assert!(
                 !forbidden_non_base.contains(&layer),
@@ -1722,6 +1936,3 @@ fn test_f8_registry_wide_face_layers_valid_and_not_animated_non_base() {
         }
     }
 }
-
-
-
