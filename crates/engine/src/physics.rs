@@ -910,6 +910,54 @@ mod tests {
     }
 
     #[test]
+    fn test_step_up_acceptance_climb() {
+        // §1 ACCEPT path (review pass 5B-R2): a fractional-height collider whose top
+        // sits inside the 0.6 step ceiling must be climbed, not blocked. tick_player
+        // tests can only cover rejection (colliders snap to unit cubes), so this
+        // drives move_and_collide directly with a half-height slab (top y = 0.5).
+        let colliders = vec![Aabb::new(1.0, 0.0, 0.0, 2.0, 0.5, 1.0)];
+        let aabb = Aabb::player_box(DVec3::new(0.5, 0.0, 0.0));
+        let (final_mv, x_col, y_col, _z_col) =
+            move_and_collide(aabb, DVec3::new(0.3, 0.0, 0.0), true, &colliders);
+
+        // Non-step path caps x at 1.0 - 0.8 = 0.2 (slab overlaps at feet height); the
+        // candidate replay climbs y = 0.5 (<= MAX_UP_STEP) where the slab no longer
+        // overlaps, so the full dx = 0.3 strictly improves horizontal progress.
+        assert!(
+            (final_mv.x - 0.3).abs() < 1e-9,
+            "must achieve full dx after stepping (got {})",
+            final_mv.x
+        );
+        assert!(
+            (final_mv.y - 0.5).abs() < 1e-9,
+            "must climb exactly the candidate height 0.5 (got {})",
+            final_mv.y
+        );
+        assert_eq!(final_mv.z, 0.0);
+        // Accepted-step flags: horizontal freed, y counts as displaced (0 -> 0.5).
+        assert!(!x_col, "stepping must not collide horizontally");
+        assert!(y_col, "climb registers as a y displacement");
+
+        // Settle next tick: gravity pulls the box back onto the slab top and latches.
+        // (Vanilla quirk, pinned by design: onGround stays FALSE on the step tick
+        // itself because requested dy == 0; it latches on the following settle.)
+        let grounded_box = Aabb::player_box(DVec3::new(0.8, 0.5, 0.0));
+        let (final_mv2, x_col2, y_col2, _z_col2) = move_and_collide(
+            grounded_box,
+            DVec3::new(0.0, (0.0 - GRAVITY) * VERTICAL_DRAG, 0.0),
+            true,
+            &colliders,
+        );
+        assert!(
+            final_mv2.y.abs() < 1e-9,
+            "must stay exactly on the slab top (got {})",
+            final_mv2.y
+        );
+        assert!(y_col2, "landing must register as a y collision");
+        assert!(!x_col2 && !_z_col2, "no horizontal movement while settling");
+    }
+
+    #[test]
     fn test_negligible_velocity_zeroing() {
         let world = EmptyWorld;
         let mut state = PlayerPhysicsState::new(DVec3::new(0.0, 10.0, 0.0));
