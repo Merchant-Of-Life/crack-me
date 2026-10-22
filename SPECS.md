@@ -649,6 +649,43 @@ flowchart TD
   - `LAYER_CUTOUT_MIPPED = 1`: Leaves blocks. Rendered in Pass 1 with [APPROX-RENDERING-02] discard.
   - `LAYER_CUTOUT = 2`: 1-bit cutout blocks (copper grates, clear glass, doors, trapdoors, saplings, rails). Rendered in Pass 1 with [APPROX-RENDERING-02] discard.
   - `LAYER_TRANSLUCENT = 3`: Semitransparent blocks (stained glass, stained glass panes, ice, frosted ice, tinted glass, slime, honey, water). Rendered in Pass 2 with alpha blending.
+- **Pass Streams & Fluid Meshing (R7, review-verified 2026-10-22)**:
+  `MeshResult` holds exactly `opaque` (layers 0/1/2) and `translucent` (layer 3)
+  streams — `combined()` is a computed view, never a stored field.
+  `FaceMergeKey.pass_bucket` (key field) forbids cross-bucket greedy merges.
+  `MESH_FLUID` faces mesh through the SAME `should_cull_face` gate and
+  registry-driven AO path as cubes and route ONLY by pass bucket (derived from
+  `render_layer`), never by mesh_type.
+- **CameraUniform — Day/Night Dampen & Tick (Step 5A pin)**:
+  16-byte aligned, 80 B total: `view_proj` [[f32;4];4] (64 B), `sky_dampen`
+  u32 (0..=15, default 0 — all pre-5A behavior unchanged), `tick_count` u32
+  (increments at 20 Hz / 50 ms), pad [u32; 2]. Render-side dampening mirrors
+  the vanilla `getRawBrightness` invariant: `eff_sky = max(0, sky_light −
+  sky_dampen)`, `lit = max(block_light, eff_sky)`, then the existing brightness
+  curve and 0.05 floor. sky_dampen / tick_count changes MUST NOT re-mesh.
+  [APPROX-RENDERING-03] day multiply stays neutral (1.0) — dampen is the sole
+  day-night control in v1.
+- **Animated Texture Frames (Step 5A pin; bake contract already on disk)**:
+  `assets/textures/animation_timeline.bin` = 8,548 u32 frame ids (34,192 B,
+  byte-size verified == `timeline_total_u32` × 4); per-texture
+  `timeline_offset` / `timeline_len` in `texture_manifest.json` sum exactly to
+  it. Runtime frame resolution is SHADER-side from `tick_count`:
+  `layer_id = timeline[offset + (tick_count / frametime) % len]` via a
+  bake-emitted per-layer meta table `animation_meta.bin` — 1844 rows ×
+  [u32 offset, u32 len, u32 frametime]. The bake must be extended once:
+  manifest currently lacks per-texture `frametime` (extract it from the
+  extracted `block_mcmetas/*.png.mcmeta` at bake time — frame sequences and
+  offsets already exist; no image re-work). Frame swaps cause NO re-meshing and
+  no extra vertex data. Textures flagged `interpolate: true` (23 in the
+  current manifest) freeze at `timeline[offset]` — interpolated blending is
+  deferred as [APPROX-RENDERING-10].
+- **Windowed Surface (Step 5A pin)**: `GpuContext::new_windowed` selects an
+  sRGB surface format (assert `format.is_srgb()`), parameterizes
+  `TerrainPipelines::new(device, color_format, depth_format)`; `new_headless`
+  inputs stay untouched (tests keep `Rgba8UnormSrgb`). The windowed path MUST
+  reuse the headless limit discipline (2048 texture-array layers in
+  `required_limits` + adapter validation). Startup prints adapter name,
+  backend, and selected surface format.
 - **Vanilla Layer Dispatch — VERIFIED (review 2026-10-22, `ChunkSectionLayer.java` release-jar decompile)**:
   vanilla 26.3 has THREE section layers — `SOLID` / `CUTOUT` / `TRANSLUCENT`.
   `ChunkSectionLayer.byTransparency(Transparency)` maps the per-quad material
