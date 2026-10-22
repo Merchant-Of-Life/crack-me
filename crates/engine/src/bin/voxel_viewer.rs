@@ -510,7 +510,8 @@ impl AppState {
         let speed = 12.0 * dt * sprint_mult;
         let (yaw_sin, yaw_cos) = self.camera_yaw.sin_cos();
         let forward = glam::vec3(yaw_sin, 0.0, yaw_cos).normalize_or_zero();
-        let right = glam::vec3(yaw_cos, 0.0, -yaw_sin).normalize_or_zero();
+        // Screen-right under RH Y-up looking along forward: right = cross(forward, up)
+        let right = glam::vec3(-yaw_cos, 0.0, yaw_sin).normalize_or_zero();
 
         if self.keys_pressed.contains(&KeyCode::KeyW) {
             self.camera_pos += forward * speed;
@@ -796,7 +797,8 @@ impl ApplicationHandler for ViewerApp {
             if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
                 if state.cursor_grabbed {
                     let sensitivity = 0.003;
-                    state.camera_yaw += (dx as f32) * sensitivity;
+                    // FPS feel: mouse right (dx>0) swings view toward screen-right (-X), i.e. yaw decreases
+                    state.camera_yaw -= (dx as f32) * sensitivity;
                     state.camera_pitch -= (dy as f32) * sensitivity;
                     state.camera_pitch = state.camera_pitch.clamp(-1.5, 1.5);
                 }
