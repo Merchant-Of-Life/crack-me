@@ -688,7 +688,13 @@ flowchart TD
   records each texture's TRUE mcmeta `frametime` (default 1 per vanilla
   semantics) as an audit field only — it is NOT part of the runtime index
   math. Every `animated` texture must have a meta row with `len ≥ 1`; every
-  static layer row `len == 0`.
+  static layer row `len == 0`. CONSUMER INVARIANT (review pin, 2026-10-22):
+  resolve math adds `frame_idx` to the VERTEX layer word, so mesh vertices
+  MUST carry a texture's `base_layer` — registry face rows may reference only
+  static layers or animated bases, never an animated `base + k` (k > 0) — and
+  `animation_meta.bin` mid-frame rows are lookup coverage only, never resolve
+  keys. A registry-wide golden test MUST enforce this (no animated non-base
+  face reference, all face layers declared in the manifest).
 - **Windowed Surface (Step 5A pin)**: `GpuContext::new_windowed` selects an
   sRGB surface format (assert `format.is_srgb()`), parameterizes
   `TerrainPipelines::new(device, color_format, depth_format)`; `new_headless`
