@@ -647,6 +647,7 @@ fn main() {
     let mut all_harvested_ids: BTreeSet<String> = BTreeSet::new();
     let mut records: BTreeMap<String, OutRec> = BTreeMap::new();
     let mut no_occlusion: BTreeSet<String> = BTreeSet::new();
+    let mut no_collision: BTreeSet<String> = BTreeSet::new();
     let mut skylight: BTreeSet<String> = BTreeSet::new();
     let mut cull_classes: BTreeMap<String, String> = BTreeMap::new();
     let mut render_layers: BTreeMap<String, String> = BTreeMap::new();
@@ -680,6 +681,13 @@ fn main() {
 
         if body.contains(".noOcclusion()") {
             no_occlusion.extend(ids.iter().cloned());
+        }
+        // Vanilla collision-shape absence (`Properties.noCollision()`) — used by the
+        // baker to zero is_solid. Distinct from noOcclusion (render-facing: glass is
+        // noOcclusion but MUST still collide). Blocks.java decompile is the oracle;
+        // e.g. leaf_litter (Blocks.java:4676-4680) is noCollision(), not a cross.
+        if body.contains(".noCollision()") {
+            no_collision.extend(ids.iter().cloned());
         }
         if constructs_transparent(&body) {
             skylight.extend(ids.iter().cloned());
@@ -814,6 +822,7 @@ fn main() {
         .collect();
 
     let no_occlusion_n = no_occlusion.len();
+    let no_collision_n = no_collision.len();
     let skylight_n = skylight.len();
     let cull_classes_n = cull_classes.len();
     let render_layers_n = render_layers.len();
@@ -849,6 +858,7 @@ fn main() {
     let mut covered_blocks: BTreeSet<String> = BTreeSet::new();
     covered_blocks.extend(emit_map.keys().cloned());
     covered_blocks.extend(no_occlusion.iter().cloned());
+    covered_blocks.extend(no_collision.iter().cloned());
     covered_blocks.extend(skylight.iter().cloned());
     covered_blocks.extend(cull_classes.keys().cloned());
     covered_blocks.extend(render_layers.keys().cloned());
@@ -870,7 +880,7 @@ fn main() {
     println!("Blocks harvested from Blocks.java: {}", all_harvested_ids.len());
     println!("Blocks with non-default properties (covered by at least 1 map): {}", covered_blocks.len());
     println!("Blocks absent from Blocks.java harvest ({}): {:?}", unharvested_from_blocks_java.len(), unharvested_from_blocks_java);
-    println!("Blocks with standard opaque defaults (absent from all 5 maps): {}", absent_from_all_maps.len());
+    println!("Blocks with standard opaque defaults (absent from all property maps): {}", absent_from_all_maps.len());
     println!(
         "Render layers breakdown (of {} registry blocks): {} solid, {} cutout_mipped, {} cutout, {} translucent",
         registry_blocks.len(),
@@ -895,6 +905,7 @@ fn main() {
         },
         "emission": emit_map,
         "no_occlusion": no_occlusion.into_iter().collect::<Vec<_>>(),
+        "no_collision": no_collision.into_iter().collect::<Vec<_>>(),
         "skylight": skylight.into_iter().collect::<Vec<_>>(),
         "cull_classes": cull_classes,
         "render_layers": render_layers,
@@ -922,9 +933,10 @@ fn main() {
         .expect("write block_properties.json");
 
     println!(
-        "block_properties.json: {} emission entries, {} noOcclusion, {} skylight, {} cull_classes, {} non-solid render_layers; {} problems",
+        "block_properties.json: {} emission entries, {} noOcclusion, {} noCollision, {} skylight, {} cull_classes, {} non-solid render_layers; {} problems",
         emit_map.len(),
         no_occlusion_n,
+        no_collision_n,
         skylight_n,
         cull_classes_n,
         render_layers_n,

@@ -1,7 +1,7 @@
 {
   "coverage_report": {
-    "blocks_with_custom_properties": 359,
-    "blocks_with_opaque_defaults": 929,
+    "blocks_with_custom_properties": 600,
+    "blocks_with_opaque_defaults": 688,
     "harvested_blocks": 1286,
     "render_layers_breakdown": {
       "cutout": 236,
@@ -300,238 +300,238 @@
   },
   "emission": {
     "amethyst_cluster": {
-      "decl": "Blocks.java:207294",
+      "decl": "Blocks.java:207015",
       "kind": "constant",
       "value": 5
     },
     "beacon": {
-      "decl": "Blocks.java:110754",
+      "decl": "Blocks.java:110519",
       "kind": "constant",
       "value": 15
     },
     "black_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "black_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "blast_furnace": {
-      "decl": "Blocks.java:181623",
+      "decl": "Blocks.java:181351",
       "kind": "lit",
       "value": 13
     },
     "blue_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "blue_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "brewing_stand": {
-      "decl": "Blocks.java:105433",
+      "decl": "Blocks.java:105198",
       "kind": "constant",
       "value": 1
     },
     "brown_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "brown_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "brown_mushroom": {
-      "decl": "Blocks.java:45812",
+      "decl": "Blocks.java:45586",
       "kind": "constant",
       "value": 1
     },
     "calibrated_sculk_sensor": {
-      "decl": "Blocks.java:214730",
+      "decl": "Blocks.java:214451",
       "inherit_from": "Blocks.java:sculk_sensor",
       "kind": "constant",
       "value": 1
     },
     "campfire": {
-      "decl": "Blocks.java:184958",
+      "decl": "Blocks.java:184686",
       "kind": "lit",
       "value": 15
     },
     "candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205824",
+      "decl": "Blocks.java:205552",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "kind": "lit",
       "value": 3
     },
     "cave_vines": {
-      "decl": "Blocks.java:225658",
+      "decl": "Blocks.java:225234",
       "kind": "lit",
       "prop": "berries",
       "value": 14
     },
     "cave_vines_plant": {
-      "decl": "Blocks.java:226034",
+      "decl": "Blocks.java:225610",
       "kind": "lit",
       "prop": "berries",
       "value": 14
     },
     "conduit": {
-      "decl": "Blocks.java:173886",
+      "decl": "Blocks.java:173614",
       "kind": "constant",
       "value": 15
     },
     "copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 15
     },
     "copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "copper_torch": {
-      "decl": "Blocks.java:86867",
+      "decl": "Blocks.java:86632",
       "kind": "constant",
       "value": 14
     },
     "copper_wall_torch": {
-      "decl": "Blocks.java:87152",
+      "decl": "Blocks.java:86917",
       "kind": "constant",
       "value": 14
     },
     "crying_obsidian": {
-      "decl": "Blocks.java:200358",
+      "decl": "Blocks.java:200086",
       "kind": "constant",
       "value": 10
     },
     "cyan_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "cyan_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "deepslate_redstone_ore": {
-      "decl": "Blocks.java:80588",
+      "decl": "Blocks.java:80362",
       "inherit_from": "Blocks.java:redstone_ore",
       "kind": "lit",
       "value": 9
     },
     "dragon_egg": {
-      "decl": "Blocks.java:107391",
+      "decl": "Blocks.java:107156",
       "kind": "constant",
       "value": 1
     },
     "enchanting_table": {
-      "decl": "Blocks.java:105080",
+      "decl": "Blocks.java:104845",
       "kind": "constant",
       "value": 7
     },
     "end_gateway": {
-      "decl": "Blocks.java:153013",
+      "decl": "Blocks.java:152771",
       "kind": "constant",
       "value": 15
     },
     "end_portal": {
-      "decl": "Blocks.java:106448",
+      "decl": "Blocks.java:106213",
       "kind": "constant",
       "value": 15
     },
     "end_portal_frame": {
-      "decl": "Blocks.java:106791",
+      "decl": "Blocks.java:106556",
       "kind": "constant",
       "value": 1
     },
     "end_rod": {
-      "decl": "Blocks.java:149691",
+      "decl": "Blocks.java:149449",
       "kind": "constant",
       "value": 14
     },
     "ender_chest": {
-      "decl": "Blocks.java:109267",
+      "decl": "Blocks.java:109032",
       "kind": "constant",
       "value": 7
     },
     "exposed_copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 12
     },
     "exposed_copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "fire": {
-      "decl": "Blocks.java:53120",
+      "decl": "Blocks.java:52894",
       "kind": "constant",
       "value": 15
     },
     "firefly_bush": {
-      "decl": "Blocks.java:239869",
+      "decl": "Blocks.java:239410",
       "kind": "constant",
       "value": 2
     },
     "furnace": {
-      "decl": "Blocks.java:56731",
+      "decl": "Blocks.java:56505",
       "kind": "lit",
       "value": 13
     },
     "glow_lichen": {
-      "decl": "Blocks.java:101061",
+      "decl": "Blocks.java:100826",
       "kind": "constant",
       "value": 7
     },
     "glowstone": {
-      "decl": "Blocks.java:87463",
+      "decl": "Blocks.java:87228",
       "kind": "constant",
       "value": 15
     },
     "gray_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "gray_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
@@ -539,57 +539,57 @@
     "green_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "green_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "jack_o_lantern": {
-      "decl": "Blocks.java:88345",
+      "decl": "Blocks.java:88110",
       "kind": "constant",
       "value": 15
     },
     "lantern": {
-      "decl": "Blocks.java:183741",
+      "decl": "Blocks.java:183469",
       "kind": "constant",
       "value": 15
     },
     "large_amethyst_bud": {
-      "decl": "Blocks.java:207707",
+      "decl": "Blocks.java:207428",
       "kind": "constant",
       "value": 4
     },
     "lava": {
-      "decl": "Blocks.java:13509",
+      "decl": "Blocks.java:13297",
       "kind": "constant",
       "value": 15
     },
     "lava_cauldron": {
-      "decl": "Blocks.java:106059",
+      "decl": "Blocks.java:105824",
       "kind": "constant",
       "value": 15
     },
     "light": {
-      "decl": "Blocks.java:128493",
+      "decl": "Blocks.java:128258",
       "kind": "prop_value",
       "prop": "level"
     },
     "light_blue_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "light_blue_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
@@ -597,13 +597,13 @@
     "light_gray_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "light_gray_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
@@ -611,13 +611,13 @@
     "lime_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "lime_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
@@ -625,76 +625,76 @@
     "magenta_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "magenta_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "magma_block": {
-      "decl": "Blocks.java:154339",
+      "decl": "Blocks.java:154097",
       "kind": "constant",
       "value": 3
     },
     "medium_amethyst_bud": {
-      "decl": "Blocks.java:207973",
+      "decl": "Blocks.java:207694",
       "kind": "constant",
       "value": 2
     },
     "nether_portal": {
-      "decl": "Blocks.java:87791",
+      "decl": "Blocks.java:87556",
       "kind": "constant",
       "value": 11
     },
     "ochre_froglight": {
-      "decl": "Blocks.java:234728",
+      "decl": "Blocks.java:234304",
       "kind": "constant",
       "value": 15
     },
     "orange_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "orange_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "oxidized_copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 4
     },
     "oxidized_copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "pearlescent_froglight": {
-      "decl": "Blocks.java:235223",
+      "decl": "Blocks.java:234799",
       "kind": "constant",
       "value": 15
     },
     "pink_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "pink_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
@@ -702,13 +702,13 @@
     "purple_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "purple_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
@@ -716,56 +716,56 @@
     "red_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "red_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     },
     "redstone_lamp": {
-      "decl": "Blocks.java:107652",
+      "decl": "Blocks.java:107417",
       "kind": "lit",
       "value": 15
     },
     "redstone_ore": {
-      "decl": "Blocks.java:80588",
+      "decl": "Blocks.java:80362",
       "kind": "lit",
       "value": 9
     },
     "redstone_torch": {
-      "decl": "Blocks.java:81218",
+      "decl": "Blocks.java:80992",
       "kind": "lit",
       "value": 7
     },
     "redstone_wall_torch": {
-      "decl": "Blocks.java:81483",
+      "decl": "Blocks.java:81257",
       "kind": "lit",
       "value": 7
     },
     "respawn_anchor": {
-      "decl": "Blocks.java:200760",
+      "decl": "Blocks.java:200488",
       "denom": 4,
       "kind": "prop_scale",
       "per": 15,
       "prop": "charge"
     },
     "sculk_catalyst": {
-      "decl": "Blocks.java:215752",
+      "decl": "Blocks.java:215473",
       "kind": "constant",
       "value": 6
     },
     "sculk_sensor": {
-      "decl": "Blocks.java:214730",
+      "decl": "Blocks.java:214451",
       "kind": "constant",
       "value": 1
     },
     "sea_lantern": {
-      "decl": "Blocks.java:130547",
+      "decl": "Blocks.java:130312",
       "kind": "constant",
       "value": 15
     },
@@ -773,149 +773,125 @@
       "add": 3,
       "alive_prop": "waterlogged",
       "count_prop": "pickles",
-      "decl": "Blocks.java:173272",
+      "decl": "Blocks.java:173009",
       "kind": "alive_scale",
       "per": 3
     },
     "shroomlight": {
-      "decl": "Blocks.java:190145",
+      "decl": "Blocks.java:189873",
       "kind": "constant",
       "value": 15
     },
     "small_amethyst_bud": {
-      "decl": "Blocks.java:208240",
+      "decl": "Blocks.java:207961",
       "kind": "constant",
       "value": 1
     },
     "smoker": {
-      "decl": "Blocks.java:181302",
+      "decl": "Blocks.java:181030",
       "kind": "lit",
       "value": 13
     },
     "soul_campfire": {
-      "decl": "Blocks.java:185340",
+      "decl": "Blocks.java:185068",
       "kind": "lit",
       "value": 10
     },
     "soul_fire": {
-      "decl": "Blocks.java:53452",
+      "decl": "Blocks.java:53226",
       "kind": "constant",
       "value": 10
     },
     "soul_lantern": {
-      "decl": "Blocks.java:184093",
+      "decl": "Blocks.java:183821",
       "kind": "constant",
       "value": 10
     },
     "soul_torch": {
-      "decl": "Blocks.java:86285",
+      "decl": "Blocks.java:86050",
       "kind": "constant",
       "value": 10
     },
     "soul_wall_torch": {
-      "decl": "Blocks.java:86564",
+      "decl": "Blocks.java:86329",
       "kind": "constant",
       "value": 10
     },
     "torch": {
-      "decl": "Blocks.java:52583",
+      "decl": "Blocks.java:52357",
       "kind": "constant",
       "value": 14
     },
-    "trial_spawner": {
-      "decl": "Blocks.java:236490",
-      "kind": "prop_map",
-      "map": {
-        "active": 8,
-        "cooldown": 0,
-        "ejecting_reward": 8,
-        "inactive": 0,
-        "waiting_for_players": 4,
-        "waiting_for_reward_ejection": 8
-      },
-      "prop": "trial_spawner_state"
-    },
-    "vault": {
-      "decl": "Blocks.java:236919",
-      "kind": "prop_map",
-      "map": {
-        "active": 12,
-        "ejecting": 12,
-        "inactive": 6,
-        "unlocking": 12
-      },
-      "prop": "vault_state"
-    },
     "verdant_froglight": {
-      "decl": "Blocks.java:234970",
+      "decl": "Blocks.java:234546",
       "kind": "constant",
       "value": 15
     },
     "wall_torch": {
-      "decl": "Blocks.java:52842",
+      "decl": "Blocks.java:52616",
       "kind": "constant",
       "value": 14
     },
     "waxed_copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 15
     },
     "waxed_copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "waxed_exposed_copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 12
     },
     "waxed_exposed_copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "waxed_oxidized_copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 4
     },
     "waxed_oxidized_copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "waxed_weathered_copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 8
     },
     "waxed_weathered_copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "weathered_copper_bulb": {
-      "decl": "Blocks.java:221429",
+      "decl": "Blocks.java:221041",
       "kind": "lit",
       "value": 8
     },
     "weathered_copper_lantern": {
-      "decl": "Blocks.java:184455",
+      "decl": "Blocks.java:184183",
       "kind": "constant",
       "value": 15
     },
     "white_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "white_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
@@ -923,19 +899,284 @@
     "yellow_candle": {
       "base": 3,
       "count_prop": "candles",
-      "decl": "Blocks.java:205944",
+      "decl": "Blocks.java:205672",
       "kind": "lit_scale",
       "per": 3,
       "prop": "lit"
     },
     "yellow_candle_cake": {
-      "decl": "Blocks.java:206232",
+      "decl": "Blocks.java:205960",
       "inherit_from": "Blocks.java:candle_cake",
       "kind": "lit",
       "value": 3
     }
   },
   "generated_by": "property_extractor (the only non-hermetic pipeline step; baker reads this JSON)",
+  "no_collision": [
+    "acacia_button",
+    "acacia_hanging_sign",
+    "acacia_pressure_plate",
+    "acacia_sapling",
+    "acacia_sign",
+    "acacia_wall_hanging_sign",
+    "acacia_wall_sign",
+    "activator_rail",
+    "air",
+    "allium",
+    "attached_melon_stem",
+    "attached_pumpkin_stem",
+    "azure_bluet",
+    "bamboo_button",
+    "bamboo_hanging_sign",
+    "bamboo_pressure_plate",
+    "bamboo_sapling",
+    "bamboo_sign",
+    "bamboo_wall_hanging_sign",
+    "bamboo_wall_sign",
+    "beetroots",
+    "big_dripleaf_stem",
+    "birch_button",
+    "birch_hanging_sign",
+    "birch_pressure_plate",
+    "birch_sapling",
+    "birch_sign",
+    "birch_wall_hanging_sign",
+    "birch_wall_sign",
+    "black_banner",
+    "black_wall_banner",
+    "blue_banner",
+    "blue_orchid",
+    "blue_wall_banner",
+    "brain_coral",
+    "brain_coral_fan",
+    "brain_coral_wall_fan",
+    "brown_banner",
+    "brown_mushroom",
+    "brown_wall_banner",
+    "bubble_column",
+    "bubble_coral",
+    "bubble_coral_fan",
+    "bubble_coral_wall_fan",
+    "bush",
+    "cactus_flower",
+    "carrots",
+    "cave_air",
+    "cave_vines",
+    "cave_vines_plant",
+    "cherry_button",
+    "cherry_hanging_sign",
+    "cherry_pressure_plate",
+    "cherry_sapling",
+    "cherry_sign",
+    "cherry_wall_hanging_sign",
+    "cherry_wall_sign",
+    "closed_eyeblossom",
+    "cobweb",
+    "copper_torch",
+    "copper_wall_torch",
+    "cornflower",
+    "crimson_button",
+    "crimson_fungus",
+    "crimson_hanging_sign",
+    "crimson_pressure_plate",
+    "crimson_roots",
+    "crimson_sign",
+    "crimson_wall_hanging_sign",
+    "crimson_wall_sign",
+    "cyan_banner",
+    "cyan_wall_banner",
+    "dandelion",
+    "dark_oak_button",
+    "dark_oak_hanging_sign",
+    "dark_oak_pressure_plate",
+    "dark_oak_sapling",
+    "dark_oak_sign",
+    "dark_oak_wall_hanging_sign",
+    "dark_oak_wall_sign",
+    "dead_brain_coral",
+    "dead_brain_coral_fan",
+    "dead_brain_coral_wall_fan",
+    "dead_bubble_coral",
+    "dead_bubble_coral_fan",
+    "dead_bubble_coral_wall_fan",
+    "dead_bush",
+    "dead_fire_coral",
+    "dead_fire_coral_fan",
+    "dead_fire_coral_wall_fan",
+    "dead_horn_coral",
+    "dead_horn_coral_fan",
+    "dead_horn_coral_wall_fan",
+    "dead_tube_coral",
+    "dead_tube_coral_fan",
+    "dead_tube_coral_wall_fan",
+    "detector_rail",
+    "end_gateway",
+    "end_portal",
+    "fern",
+    "fire",
+    "fire_coral",
+    "fire_coral_fan",
+    "fire_coral_wall_fan",
+    "firefly_bush",
+    "frogspawn",
+    "glow_lichen",
+    "golden_dandelion",
+    "gray_banner",
+    "gray_wall_banner",
+    "green_banner",
+    "green_wall_banner",
+    "hanging_roots",
+    "heavy_weighted_pressure_plate",
+    "horn_coral",
+    "horn_coral_fan",
+    "horn_coral_wall_fan",
+    "jungle_button",
+    "jungle_hanging_sign",
+    "jungle_pressure_plate",
+    "jungle_sapling",
+    "jungle_sign",
+    "jungle_wall_hanging_sign",
+    "jungle_wall_sign",
+    "kelp",
+    "kelp_plant",
+    "large_fern",
+    "lava",
+    "leaf_litter",
+    "lever",
+    "light_blue_banner",
+    "light_blue_wall_banner",
+    "light_gray_banner",
+    "light_gray_wall_banner",
+    "light_weighted_pressure_plate",
+    "lilac",
+    "lily_of_the_valley",
+    "lime_banner",
+    "lime_wall_banner",
+    "magenta_banner",
+    "magenta_wall_banner",
+    "mangrove_button",
+    "mangrove_hanging_sign",
+    "mangrove_pressure_plate",
+    "mangrove_propagule",
+    "mangrove_sign",
+    "mangrove_wall_hanging_sign",
+    "mangrove_wall_sign",
+    "melon_stem",
+    "nether_portal",
+    "nether_sprouts",
+    "nether_wart",
+    "oak_button",
+    "oak_hanging_sign",
+    "oak_pressure_plate",
+    "oak_sapling",
+    "oak_sign",
+    "oak_wall_hanging_sign",
+    "oak_wall_sign",
+    "open_eyeblossom",
+    "orange_banner",
+    "orange_tulip",
+    "orange_wall_banner",
+    "oxeye_daisy",
+    "pale_hanging_moss",
+    "pale_oak_button",
+    "pale_oak_hanging_sign",
+    "pale_oak_pressure_plate",
+    "pale_oak_sapling",
+    "pale_oak_sign",
+    "pale_oak_wall_hanging_sign",
+    "pale_oak_wall_sign",
+    "peony",
+    "pink_banner",
+    "pink_petals",
+    "pink_tulip",
+    "pink_wall_banner",
+    "pitcher_crop",
+    "pitcher_plant",
+    "polished_blackstone_button",
+    "polished_blackstone_pressure_plate",
+    "poplar_button",
+    "poplar_hanging_sign",
+    "poplar_pressure_plate",
+    "poplar_sapling",
+    "poplar_sign",
+    "poplar_wall_hanging_sign",
+    "poplar_wall_sign",
+    "poppy",
+    "potatoes",
+    "powered_rail",
+    "pumpkin_stem",
+    "purple_banner",
+    "purple_wall_banner",
+    "rail",
+    "red_banner",
+    "red_mushroom",
+    "red_shrub",
+    "red_tulip",
+    "red_wall_banner",
+    "redstone_torch",
+    "redstone_wall_torch",
+    "redstone_wire",
+    "resin_clump",
+    "rose_bush",
+    "scaffolding",
+    "sculk_vein",
+    "seagrass",
+    "short_dry_grass",
+    "short_grass",
+    "small_dripleaf",
+    "soul_fire",
+    "soul_torch",
+    "soul_wall_torch",
+    "spore_blossom",
+    "spruce_button",
+    "spruce_hanging_sign",
+    "spruce_pressure_plate",
+    "spruce_sapling",
+    "spruce_sign",
+    "spruce_wall_hanging_sign",
+    "spruce_wall_sign",
+    "stone_button",
+    "stone_pressure_plate",
+    "structure_void",
+    "sugar_cane",
+    "sunflower",
+    "sweet_berry_bush",
+    "tall_dry_grass",
+    "tall_grass",
+    "tall_seagrass",
+    "torch",
+    "torchflower",
+    "torchflower_crop",
+    "tripwire",
+    "tripwire_hook",
+    "tube_coral",
+    "tube_coral_fan",
+    "tube_coral_wall_fan",
+    "twisting_vines",
+    "twisting_vines_plant",
+    "vine",
+    "void_air",
+    "wall_torch",
+    "warped_button",
+    "warped_fungus",
+    "warped_hanging_sign",
+    "warped_pressure_plate",
+    "warped_roots",
+    "warped_sign",
+    "warped_wall_hanging_sign",
+    "warped_wall_sign",
+    "water",
+    "weeping_vines",
+    "weeping_vines_plant",
+    "wheat",
+    "white_banner",
+    "white_tulip",
+    "white_wall_banner",
+    "wildflowers",
+    "wither_rose",
+    "yellow_banner",
+    "yellow_wall_banner"
+  ],
   "no_occlusion": [
     "acacia_door",
     "acacia_leaves",

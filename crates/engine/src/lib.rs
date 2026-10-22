@@ -280,6 +280,37 @@ mod tests {
     }
 
     #[test]
+    fn test_solid_gating_from_baked_registry() {
+        // §1 collision gating (review pass 5B-R2): the sweep collides only where
+        // `is_solid(state) == true`. Pin the baked classification of both canonical
+        // sets — canonical solids block, canonical non-solids (air / fluids / cross
+        // decoration / ground litter — vanilla Blocks.java `.noCollision()`, e.g.
+        // leaf_litter Blocks.java:4676-4680) let falling bodies pass through.
+        let reg = load_oracle_registry();
+
+        for name in ["stone", "grass_block", "dirt", "oak_log", "oak_leaves", "sand"] {
+            let id = state_id_of(&reg, name);
+            assert!(reg.is_solid(id as u32), "`{}` must be solid", name);
+        }
+
+        for name in [
+            "air",
+            "water",
+            "lava",
+            "short_grass",
+            "tall_grass",
+            "leaf_litter",
+            "oak_sapling",
+            "torch",
+            "dandelion",
+            "poppy",
+        ] {
+            let id = state_id_of(&reg, name);
+            assert!(!reg.is_solid(id as u32), "`{}` must NOT be solid", name);
+        }
+    }
+
+    #[test]
     fn test_added_6d_furnace_lit_vs_unlit() {
         let reg = load_oracle_registry();
         let furnace = reg.get_block("furnace").unwrap();

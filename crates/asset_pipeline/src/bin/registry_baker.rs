@@ -453,6 +453,8 @@ struct RawBlockProps {
     #[serde(default)]
     pub no_occlusion: BTreeSet<String>,
     #[serde(default)]
+    pub no_collision: BTreeSet<String>,
+    #[serde(default)]
     pub skylight: BTreeSet<String>,
     #[serde(default)]
     pub cull_classes: BTreeMap<String, String>,
@@ -464,6 +466,7 @@ struct RawBlockProps {
 pub struct BlockProps {
     pub emission: BTreeMap<String, Emission>,
     pub no_occlusion: BTreeSet<String>,
+    pub no_collision: BTreeSet<String>,
     pub skylight: BTreeSet<String>,
     pub cull_classes: BTreeMap<String, u8>,
     pub render_layers: BTreeMap<String, u8>,
@@ -514,10 +517,23 @@ impl BlockProps {
         Ok(Self {
             emission: raw.emission,
             no_occlusion: raw.no_occlusion,
+            no_collision: raw.no_collision,
             skylight: raw.skylight,
             cull_classes,
             render_layers,
         })
+    }
+
+    /// §1 collision gating: vanillla `noCollision()` (harvested from the Blocks.java
+    /// decompile by property_extractor) forces is_solid = 0 regardless of the
+    /// structural mesh-type inference (leaf_litter, pink_petals, torch, ...).
+    /// Distinct from noOcclusion — glass is noOcclusion but still collides.
+    pub fn solid(&self, block: &str, inferred: u8) -> u8 {
+        if self.no_collision.contains(block) {
+            0
+        } else {
+            inferred
+        }
     }
 
     pub fn cull_class(&self, block: &str) -> u8 {
@@ -869,7 +885,7 @@ pub fn bake(
             let mut entry = BlockStateEntry::default();
             entry.mesh_type = mesh_type;
             entry.is_opaque = props.is_opaque(&name, mesh_type);
-            entry.is_solid = is_solid(mesh_type);
+            entry.is_solid = props.solid(&name, is_solid(mesh_type));
             let empty = BTreeMap::new();
             entry.light_emission = props.emission_row(&name, &empty, true);
             entry.light_filter = props.light_filter(&name, mesh_type);
@@ -1031,7 +1047,7 @@ fn cube_state_row(
     let mut entry = BlockStateEntry::default();
     entry.mesh_type = mesh_type;
     entry.is_opaque = block_props.is_opaque(block, mesh_type);
-    entry.is_solid = is_solid(mesh_type);
+    entry.is_solid = block_props.solid(block, is_solid(mesh_type));
     entry.light_emission = block_props.emission_row(block, vals, false);
     entry.light_filter = block_props.light_filter(block, mesh_type);
     entry.pad[0] = block_props.cull_class(block);
